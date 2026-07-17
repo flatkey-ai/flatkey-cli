@@ -60,5 +60,119 @@ export async function main(argv) {
     return;
   }
 
-  process.stdout.write(`${JSON.stringify(command)}\n`);
+  const result = await runCommand(command);
+  if (result !== undefined) {
+    process.stdout.write(
+      command.options.json ? `${JSON.stringify(result)}\n` : `${formatHuman(result)}\n`,
+    );
+  }
+}
+
+export async function runCommand(command, deps = {}) {
+  const stdout = deps.stdout ?? process.stdout;
+  const stderr = deps.stderr ?? process.stderr;
+
+  if (command.group === "help") {
+    const { getAiHelp, getHumanHelp } = await import("./help.js");
+    return command.options.ai ? getAiHelp() : getHumanHelp();
+  }
+  if (command.group === "version") {
+    return { version: "0.1.0" };
+  }
+
+  if (command.group === "models") {
+    return handleModels(command, deps);
+  }
+
+  if (command.group === "credits" || command.group === "status") {
+    return handleUtility(command, deps);
+  }
+
+  if (["image", "video", "audio"].includes(command.group)) {
+    if (command.action !== "generate") {
+      throw new Error(`Unknown action for ${command.group}: ${command.action}`);
+    }
+    return handleGenerate(command, { ...deps, stdout, stderr });
+  }
+
+  throw new Error(`Unknown command: ${command.group}`);
+}
+
+async function handleGenerate(command, deps) {
+  const { resolveApiKey } = await import("./config.js");
+  const { generateAudio, generateImage, generateVideo } = await import("./api.js");
+  const { persistArtifacts } = await import("./artifacts.js");
+  const { createAnimation } = await import("./animation.js");
+  const apiKey = await resolveApiKey({
+    apiKey: command.options.api_key,
+    env: deps.env ?? process.env,
+  });
+  const options = {
+    ...command.options,
+    apiKey,
+    baseUrl: command.options.base_url,
+    fetch: deps.fetch,
+  };
+  const animation = createAnimation({
+    json: Boolean(command.options.json),
+    stream: deps.stderr,
+  });
+  animation.start(command.group);
+  try {
+    const response = command.group === "image"
+      ? await generateImage(options)
+      : command.group === "video"
+        ? await generateVideo(options)
+        : await generateAudio(options);
+    const artifacts = await persistArtifacts({
+      kind: command.group,
+      response,
+      outDir: command.options.out ?? "flatkey-output",
+    });
+    return { kind: command.group, artifacts, response };
+  } finally {
+    animation.stop();
+  }
+}
+
+async function handleUtility(command, deps) {
+  const { resolveApiKey } = await import("./config.js");
+  const { getCredits, getStatus } = await import("./api.js");
+  const apiKey = await resolveApiKey({
+    apiKey: command.options.api_key,
+    env: deps.env ?? process.env,
+  });
+  const options = {
+    apiKey,
+    baseUrl: command.options.base_url,
+    fetch: deps.fetch,
+  };
+  return command.group === "credits" ? getCredits(options) : getStatus(options);
+}
+
+async function handleModels(command, deps) {
+  const { resolveApiKey } = await import("./config.js");
+  const { getModels } = await import("./api.js");
+  const { getBundledModels, normalizeModels } = await import("./models.js");
+
+  try {
+    const apiKey = await resolveApiKey({
+      apiKey: command.options.api_key,
+      env: deps.env ?? process.env,
+    });
+    const response = await getModels({
+      apiKey,
+      baseUrl: command.options.base_url,
+      fetch: deps.fetch,
+    });
+    const models = normalizeModels(response, command.options.type);
+    return { models: models.length ? models : getBundledModels(command.options.type) };
+  } catch {
+    return { models: getBundledModels(command.options.type) };
+  }
+}
+
+function formatHuman(result) {
+  if (typeof result === "string") return result;
+  return JSON.stringify(result, null, 2);
 }
