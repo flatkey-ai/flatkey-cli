@@ -4,6 +4,8 @@ const BUNDLED_MODELS = [
   { id: "gpt-image-2", type: "image" },
   { id: "veo-3", type: "video" },
   { id: "veo-3-fast", type: "video" },
+  { id: "seedance2", type: "video" },
+  { id: "gpt-5.5", type: "text" },
   { id: "tts-1", type: "audio" },
   { id: "gpt-4o-mini-tts", type: "audio" },
 ];
@@ -35,5 +37,10 @@ function inferType(model) {
   if (model.capabilities?.includes("video")) return "video";
   if (model.capabilities?.includes("audio")) return "audio";
   if (model.capabilities?.includes("image")) return "image";
+  if (model.capabilities?.includes("text")) return "text";
+  if (/image|nano-banana/i.test(model.id)) return "image";
+  if (/seedance|veo|sora|video/i.test(model.id)) return "video";
+  if (/tts|audio|voice|speech/i.test(model.id)) return "audio";
+  if (model.object === "model") return "text";
   return undefined;
 }

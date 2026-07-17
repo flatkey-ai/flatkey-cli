@@ -9,9 +9,13 @@ export class FlatkeyError extends Error {
 }
 
 export async function generateImage(options) {
+  return requestJsonFromPlan(options, planImageRequest(options));
+}
+
+export function planImageRequest(options) {
   const model = options.model ?? "nano-banana-pro-preview";
   if (model.startsWith("gpt")) {
-    return postJson(options, "/v1/images/generations", cleanObject({
+    return planJsonPost(options, "/v1/images/generations", cleanObject({
       model,
       prompt: options.prompt,
       size: options.size,
@@ -21,17 +25,21 @@ export async function generateImage(options) {
   }
 
   const path = `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(options.apiKey)}`;
-  return requestJson(options, path, {
+  return planRequest(options, path, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+    body: {
       contents: [{ parts: [{ text: options.prompt }] }],
-    }),
+    },
   });
 }
 
 export function generateVideo(options) {
-  return postJson(options, "/v1/videos/generations", cleanObject({
+  return requestJsonFromPlan(options, planVideoRequest(options));
+}
+
+export function planVideoRequest(options) {
+  return planJsonPost(options, "/v1/videos/generations", cleanObject({
     model: options.model ?? "veo-3",
     prompt: options.prompt,
     duration: parseOptionalInteger(options.duration),
@@ -41,12 +49,27 @@ export function generateVideo(options) {
 }
 
 export function generateAudio(options) {
-  return postJson(options, "/v1/audio/generations", cleanObject({
+  return requestJsonFromPlan(options, planAudioRequest(options));
+}
+
+export function planAudioRequest(options) {
+  return planJsonPost(options, "/v1/audio/generations", cleanObject({
     model: options.model ?? "tts-1",
     prompt: options.prompt,
     voice: options.voice,
     format: options.format,
   }));
+}
+
+export function generateText(options) {
+  return requestJsonFromPlan(options, planTextRequest(options));
+}
+
+export function planTextRequest(options) {
+  return planJsonPost(options, "/v1/chat/completions", {
+    model: options.model ?? "gpt-5.5",
+    messages: [{ role: "user", content: options.prompt }],
+  });
 }
 
 export function getCredits(options) {
@@ -62,22 +85,32 @@ export function getModels(options) {
 }
 
 async function postJson(options, path, payload) {
-  return requestJson(options, path, {
+  return requestJsonFromPlan(options, planJsonPost(options, path, payload));
+}
+
+function planJsonPost(options, path, payload) {
+  return planRequest(options, path, {
     method: "POST",
     headers: jsonHeaders(options.apiKey),
-    body: JSON.stringify(payload),
+    body: payload,
   });
 }
 
-async function requestJson(options, path, init = {}) {
+function planRequest(options, path, init = {}) {
+  return {
+    url: buildUrl(options.baseUrl, path),
+    method: init.method ?? "GET",
+    headers: init.headers ?? authHeaders(options.apiKey),
+    body: init.body,
+  };
+}
+
+async function requestJsonFromPlan(options, plan) {
   const fetchImpl = options.fetch ?? fetch;
-  const response = await fetchImpl(buildUrl(options.baseUrl, path), {
-    method: "GET",
-    ...init,
-    headers: {
-      ...authHeaders(options.apiKey),
-      ...init.headers,
-    },
+  const response = await fetchImpl(plan.url, {
+    method: plan.method,
+    headers: plan.headers,
+    body: plan.body === undefined ? undefined : JSON.stringify(plan.body),
   });
   const body = await readJson(response);
   if (!response.ok) {
@@ -86,6 +119,17 @@ async function requestJson(options, path, init = {}) {
     });
   }
   return body;
+}
+
+async function requestJson(options, path, init = {}) {
+  return requestJsonFromPlan(options, planRequest(options, path, {
+    method: init.method ?? "GET",
+    headers: {
+      ...authHeaders(options.apiKey),
+      ...init.headers,
+    },
+    body: init.body ? JSON.parse(init.body) : undefined,
+  }));
 }
 
 function buildUrl(baseUrl = DEFAULT_BASE_URL, path) {

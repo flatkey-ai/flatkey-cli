@@ -13,11 +13,12 @@ JSON mode:
 
 Commands:
 - flatkey image generate --prompt "<prompt>" --json [--model <model>] [--size 1024x1024] [--out flatkey-output]
-- flatkey video generate --prompt "<prompt>" --json [--model veo-3] [--duration 8] [--aspect 16:9]
+- flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--duration 8] [--aspect 16:9]
 - flatkey audio generate --prompt "<prompt>" --json [--model tts-1] [--voice alloy] [--format mp3]
+- flatkey text generate --prompt "<prompt>" --json [--model gpt-5.5]
 - flatkey credits --json
 - flatkey status --json
-- flatkey models --json [--type image|video|audio]
+- flatkey models --json [--type image|video|audio|text]
 - flatkey help --ai
 
 Environment:
@@ -39,6 +40,7 @@ Commands:
   image generate --prompt <txt>  Generate image
   video generate --prompt <txt>  Generate video
   audio generate --prompt <txt>  Generate audio
+  text generate --prompt <txt>   Generate text
   credits                        Show remaining credits
   status                         Show usage/status
   models                         List available models

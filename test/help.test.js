@@ -11,6 +11,7 @@ test("ai help teaches agents setup and command usage", () => {
   assert.match(help, /flatkey image generate/);
   assert.match(help, /flatkey video generate/);
   assert.match(help, /flatkey audio generate/);
+  assert.match(help, /flatkey text generate/);
   assert.match(help, /flatkey credits --json/);
   assert.match(help, /flatkey status --json/);
   assert.match(help, /flatkey models --json/);
@@ -24,4 +25,5 @@ test("human help lists core commands", () => {
   assert.match(help, /Usage: flatkey/);
   assert.match(help, /image generate/);
   assert.match(help, /models/);
+  assert.match(help, /text generate/);
 });

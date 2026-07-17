@@ -6,11 +6,12 @@ const COMMANDS = new Set([
   "models",
   "onboard",
   "status",
+  "text",
   "version",
   "video",
 ]);
 
-const GROUP_ACTIONS = new Set(["audio", "image", "video"]);
+const GROUP_ACTIONS = new Set(["audio", "image", "text", "video"]);
 
 export function parseArgv(argv) {
   const [group, maybeAction, ...rest] = argv;
@@ -88,7 +89,7 @@ export async function runCommand(command, deps = {}) {
     return handleUtility(command, deps);
   }
 
-  if (["image", "video", "audio"].includes(command.group)) {
+  if (["image", "video", "audio", "text"].includes(command.group)) {
     if (command.action !== "generate") {
       throw new Error(`Unknown action for ${command.group}: ${command.action}`);
     }
@@ -100,19 +101,40 @@ export async function runCommand(command, deps = {}) {
 
 async function handleGenerate(command, deps) {
   const { resolveApiKey } = await import("./config.js");
-  const { generateAudio, generateImage, generateVideo } = await import("./api.js");
+  const {
+    generateAudio,
+    generateImage,
+    generateText,
+    generateVideo,
+    planAudioRequest,
+    planImageRequest,
+    planTextRequest,
+    planVideoRequest,
+  } = await import("./api.js");
   const { persistArtifacts } = await import("./artifacts.js");
   const { createAnimation } = await import("./animation.js");
-  const apiKey = await resolveApiKey({
-    apiKey: command.options.api_key,
-    env: deps.env ?? process.env,
-  });
+  const apiKey = command.options.dry_run
+    ? (command.options.api_key ?? "FLATKEY_API_KEY")
+    : await resolveApiKey({
+        apiKey: command.options.api_key,
+        env: deps.env ?? process.env,
+      });
   const options = {
     ...command.options,
     apiKey,
     baseUrl: command.options.base_url,
     fetch: deps.fetch,
   };
+  if (command.options.dry_run) {
+    const request = command.group === "image"
+      ? planImageRequest(options)
+      : command.group === "video"
+        ? planVideoRequest(options)
+        : command.group === "audio"
+          ? planAudioRequest(options)
+          : planTextRequest(options);
+    return { dryRun: true, kind: command.group, request: redactRequest(request) };
+  }
   const animation = createAnimation({
     json: Boolean(command.options.json),
     stream: deps.stderr,
@@ -123,7 +145,12 @@ async function handleGenerate(command, deps) {
       ? await generateImage(options)
       : command.group === "video"
         ? await generateVideo(options)
-        : await generateAudio(options);
+        : command.group === "audio"
+          ? await generateAudio(options)
+          : await generateText(options);
+    if (command.group === "text") {
+      return { kind: command.group, text: extractText(response), response };
+    }
     const artifacts = await persistArtifacts({
       kind: command.group,
       response,
@@ -133,6 +160,25 @@ async function handleGenerate(command, deps) {
   } finally {
     animation.stop();
   }
+}
+
+function extractText(response) {
+  return response?.choices?.[0]?.message?.content
+    ?? response?.output_text
+    ?? response?.text
+    ?? "";
+}
+
+function redactRequest(request) {
+  return {
+    ...request,
+    headers: Object.fromEntries(
+      Object.entries(request.headers ?? {}).map(([key, value]) => [
+        key,
+        key.toLowerCase() === "authorization" ? "Bearer <redacted>" : value,
+      ]),
+    ),
+  };
 }
 
 async function handleUtility(command, deps) {

@@ -21,6 +21,8 @@ test("runs generation and utility commands in json mode", async (t) => {
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/video.mp4" }] }));
       } else if (request.url === "/v1/audio/generations") {
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/audio.mp3" }] }));
+      } else if (request.url === "/v1/chat/completions") {
+        response.end(JSON.stringify({ choices: [{ message: { content: "headline" } }] }));
       } else if (request.url === "/v1/credits") {
         response.end(JSON.stringify({ remaining: 42, used: 8 }));
       } else if (request.url === "/v1/status") {
@@ -41,6 +43,7 @@ test("runs generation and utility commands in json mode", async (t) => {
   const image = await runCli(["image", "generate", "--prompt", "poster", ...common]);
   const video = await runCli(["video", "generate", "--prompt", "clip", ...common]);
   const audio = await runCli(["audio", "generate", "--prompt", "voice", ...common]);
+  const text = await runCli(["text", "generate", "--prompt", "headline", ...common]);
   const credits = await runCli(["credits", ...common]);
   const status = await runCli(["status", ...common]);
   const models = await runCli(["models", ...common]);
@@ -48,6 +51,7 @@ test("runs generation and utility commands in json mode", async (t) => {
   assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ url: "https://cdn.test/image.png" }]);
   assert.deepEqual(JSON.parse(video.stdout).artifacts, [{ url: "https://cdn.test/video.mp4" }]);
   assert.deepEqual(JSON.parse(audio.stdout).artifacts, [{ url: "https://cdn.test/audio.mp3" }]);
+  assert.equal(JSON.parse(text.stdout).text, "headline");
   assert.equal(JSON.parse(credits.stdout).remaining, 42);
   assert.equal(JSON.parse(status.stdout).status, "ok");
   assert.deepEqual(JSON.parse(models.stdout).models, [
@@ -57,6 +61,27 @@ test("runs generation and utility commands in json mode", async (t) => {
   assert.ok(requests.some((request) => request.url.startsWith("/v1beta/models/")));
   assert.ok(requests.some((request) => request.url === "/v1/videos/generations"));
   assert.ok(requests.some((request) => request.url === "/v1/audio/generations"));
+  assert.ok(requests.some((request) => request.url === "/v1/chat/completions"));
+});
+
+test("dry-run returns planned request without calling network", async () => {
+  const result = await runCli([
+    "image",
+    "generate",
+    "--prompt",
+    "poster",
+    "--model",
+    "gpt-image-2",
+    "--dry-run",
+    "--json",
+  ]);
+
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.dryRun, true);
+  assert.equal(payload.kind, "image");
+  assert.equal(payload.request.url, "https://router.flatkey.ai/v1/images/generations");
+  assert.equal(payload.request.body.model, "gpt-image-2");
+  assert.equal(result.stderr, "");
 });
 
 test("prints json errors to stderr in json mode", async () => {

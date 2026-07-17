@@ -5,10 +5,14 @@ import {
   FlatkeyError,
   generateAudio,
   generateImage,
+  generateText,
   generateVideo,
   getCredits,
   getModels,
   getStatus,
+  planImageRequest,
+  planTextRequest,
+  planVideoRequest,
 } from "../src/api.js";
 
 function fetchRecorder(responseBody = { ok: true }) {
@@ -93,6 +97,39 @@ test("builds video generation request", async () => {
   });
 });
 
+test("builds seedance2 video generation request", async () => {
+  const { fetch, calls } = fetchRecorder({ data: [] });
+
+  await generateVideo({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "seedance2",
+    prompt: "newsroom b-roll",
+    fetch,
+  });
+
+  assert.equal(calls[0].url, "https://router.test/v1/videos/generations");
+  assert.equal(JSON.parse(calls[0].init.body).model, "seedance2");
+});
+
+test("builds text generation request for gpt-5.5", async () => {
+  const { fetch, calls } = fetchRecorder({ choices: [{ message: { content: "copy" } }] });
+
+  await generateText({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "gpt-5.5",
+    prompt: "write headline",
+    fetch,
+  });
+
+  assert.equal(calls[0].url, "https://router.test/v1/chat/completions");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    model: "gpt-5.5",
+    messages: [{ role: "user", content: "write headline" }],
+  });
+});
+
 test("builds audio generation request", async () => {
   const { fetch, calls } = fetchRecorder({ data: [] });
 
@@ -126,6 +163,43 @@ test("builds credits, status, and models requests", async () => {
   assert.equal(calls[1].url, "https://router.test/v1/status");
   assert.equal(calls[2].url, "https://router.test/v1/models");
   assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+  assert.equal(calls[2].init.headers.Authorization, "Bearer key");
+});
+
+test("plans model list request from new-api relay route", async () => {
+  const { fetch, calls } = fetchRecorder({ object: "list", data: [{ id: "gpt-5.5" }] });
+
+  await getModels({ apiKey: "env-key", baseUrl: "https://router.flatkey.ai", fetch });
+
+  assert.equal(calls[0].url, "https://router.flatkey.ai/v1/models");
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer env-key");
+});
+
+test("plans dry-run requests for target media models", () => {
+  assert.equal(planImageRequest({
+    apiKey: "key",
+    model: "gpt-image-2",
+    prompt: "poster",
+  }).url, "https://router.flatkey.ai/v1/images/generations");
+
+  assert.match(planImageRequest({
+    apiKey: "key",
+    model: "nano-banana-pro-preview",
+    prompt: "poster",
+  }).url, /\/v1beta\/models\/nano-banana-pro-preview:generateContent\?key=key$/);
+
+  assert.equal(planVideoRequest({
+    apiKey: "key",
+    model: "seedance2",
+    prompt: "clip",
+  }).body.model, "seedance2");
+
+  assert.equal(planTextRequest({
+    apiKey: "key",
+    model: "gpt-5.5",
+    prompt: "headline",
+  }).body.model, "gpt-5.5");
 });
 
 test("throws FlatkeyError with API message on HTTP failure", async () => {

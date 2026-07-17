@@ -32,6 +32,7 @@ export FLATKEY_API_KEY=<key>
 flatkey image generate --prompt "magazine cover" --json
 flatkey video generate --prompt "product launch clip" --json
 flatkey audio generate --prompt "30 second voiceover" --json
+flatkey text generate --prompt "write a headline" --model gpt-5.5 --json
 flatkey credits --json
 flatkey status --json
 flatkey models --json

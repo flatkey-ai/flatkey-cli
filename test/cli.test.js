@@ -28,6 +28,30 @@ test("parses credits with json mode", () => {
   });
 });
 
+test("parses text generation with dry-run", () => {
+  const command = parseArgv([
+    "text",
+    "generate",
+    "--prompt",
+    "write lead",
+    "--model",
+    "gpt-5.5",
+    "--dry-run",
+    "--json",
+  ]);
+
+  assert.deepEqual(command, {
+    group: "text",
+    action: "generate",
+    options: {
+      prompt: "write lead",
+      model: "gpt-5.5",
+      dry_run: true,
+      json: true,
+    },
+  });
+});
+
 test("parses ai help", () => {
   const command = parseArgv(["help", "--ai"]);
 
