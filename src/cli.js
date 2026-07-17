@@ -53,5 +53,12 @@ function parseOptions(tokens) {
 
 export async function main(argv) {
   const command = parseArgv(argv);
+  if (command.group === "onboard") {
+    const { writeConfig } = await import("./config.js");
+    const configPath = await writeConfig({ apiKey: command.options.api_key });
+    process.stdout.write(`Saved Flatkey config: ${configPath}\n`);
+    return;
+  }
+
   process.stdout.write(`${JSON.stringify(command)}\n`);
 }
