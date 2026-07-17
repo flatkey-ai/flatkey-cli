@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a Flatkey CLI bug.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Paste the command. Redact API keys.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Paste relevant stdout/stderr. Redact secrets.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Run `flatkey --version`.
+      placeholder: "0.1.4"
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed API keys and secrets from this report.
+          required: true
+        - label: I tried the command again with `--dry-run` when applicable.
+          required: false
