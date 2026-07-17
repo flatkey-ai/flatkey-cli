@@ -27,7 +27,10 @@ export function planImageRequest(options) {
   const path = `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(options.apiKey)}`;
   return planRequest(options, path, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      ...jsonHeaders(options.apiKey),
+      "x-goog-api-key": options.apiKey,
+    },
     body: {
       contents: [{ parts: [{ text: options.prompt }] }],
     },
@@ -39,7 +42,7 @@ export function generateVideo(options) {
 }
 
 export function planVideoRequest(options) {
-  return planJsonPost(options, "/v1/videos/generations", cleanObject({
+  return planJsonPost(options, "/v1/video/generations", cleanObject({
     model: options.model ?? "veo-3",
     prompt: options.prompt,
     duration: parseOptionalInteger(options.duration),
@@ -81,7 +84,7 @@ export function getStatus(options) {
 }
 
 export function getModels(options) {
-  return requestJson(options, "/v1/models");
+  return requestJson(options, "/v1/available_models");
 }
 
 async function postJson(options, path, payload) {

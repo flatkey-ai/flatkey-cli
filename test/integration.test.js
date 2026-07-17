@@ -20,7 +20,7 @@ test("runs generation and utility commands in json mode", async (t) => {
       response.setHeader("content-type", "application/json");
       if (request.url.startsWith("/v1beta/models/")) {
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/image.png" }] }));
-      } else if (request.url === "/v1/videos/generations") {
+      } else if (request.url === "/v1/video/generations") {
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/video.mp4" }] }));
       } else if (request.url === "/v1/audio/generations") {
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/audio.mp3" }] }));
@@ -30,8 +30,12 @@ test("runs generation and utility commands in json mode", async (t) => {
         response.end(JSON.stringify({ remaining: 42, used: 8 }));
       } else if (request.url === "/v1/status") {
         response.end(JSON.stringify({ status: "ok" }));
-      } else if (request.url === "/v1/models") {
-        response.end(JSON.stringify({ data: [{ id: "remote-image", type: "image" }] }));
+      } else if (request.url === "/v1/available_models") {
+        response.end(JSON.stringify({
+          success: true,
+          object: "list",
+          data: [{ id: "remote-image", object: "model", owned_by: "flatkey" }],
+        }));
       } else {
         response.statusCode = 404;
         response.end(JSON.stringify({ error: { message: "not found" } }));
@@ -62,7 +66,7 @@ test("runs generation and utility commands in json mode", async (t) => {
   ]);
   assert.equal(image.stderr, "");
   assert.ok(requests.some((request) => request.url.startsWith("/v1beta/models/")));
-  assert.ok(requests.some((request) => request.url === "/v1/videos/generations"));
+  assert.ok(requests.some((request) => request.url === "/v1/video/generations"));
   assert.ok(requests.some((request) => request.url === "/v1/audio/generations"));
   assert.ok(requests.some((request) => request.url === "/v1/chat/completions"));
 });

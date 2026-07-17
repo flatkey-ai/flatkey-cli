@@ -45,6 +45,8 @@ test("builds nano image request using gemini-style route", async () => {
     "https://router.test/v1beta/models/nano-banana-pro-preview:generateContent?key=key",
   );
   assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+  assert.equal(calls[0].init.headers["x-goog-api-key"], "key");
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     contents: [{ parts: [{ text: "poster" }] }],
   });
@@ -87,7 +89,7 @@ test("builds video generation request", async () => {
     fetch,
   });
 
-  assert.equal(calls[0].url, "https://router.test/v1/videos/generations");
+  assert.equal(calls[0].url, "https://router.test/v1/video/generations");
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     model: "veo-3",
     prompt: "walkthrough",
@@ -108,7 +110,7 @@ test("builds seedance2 video generation request", async () => {
     fetch,
   });
 
-  assert.equal(calls[0].url, "https://router.test/v1/videos/generations");
+  assert.equal(calls[0].url, "https://router.test/v1/video/generations");
   assert.equal(JSON.parse(calls[0].init.body).model, "seedance2");
 });
 
@@ -161,17 +163,21 @@ test("builds credits, status, and models requests", async () => {
 
   assert.equal(calls[0].url, "https://router.test/v1/credits");
   assert.equal(calls[1].url, "https://router.test/v1/status");
-  assert.equal(calls[2].url, "https://router.test/v1/models");
+  assert.equal(calls[2].url, "https://router.test/v1/available_models");
   assert.equal(calls[0].init.headers.Authorization, "Bearer key");
   assert.equal(calls[2].init.headers.Authorization, "Bearer key");
 });
 
-test("plans model list request from new-api relay route", async () => {
-  const { fetch, calls } = fetchRecorder({ object: "list", data: [{ id: "gpt-5.5" }] });
+test("plans available model list request from new-api relay route", async () => {
+  const { fetch, calls } = fetchRecorder({
+    success: true,
+    object: "list",
+    data: [{ id: "gpt-5.5", object: "model", owned_by: "flatkey" }],
+  });
 
   await getModels({ apiKey: "env-key", baseUrl: "https://router.flatkey.ai", fetch });
 
-  assert.equal(calls[0].url, "https://router.flatkey.ai/v1/models");
+  assert.equal(calls[0].url, "https://router.flatkey.ai/v1/available_models");
   assert.equal(calls[0].init.method, "GET");
   assert.equal(calls[0].init.headers.Authorization, "Bearer env-key");
 });
