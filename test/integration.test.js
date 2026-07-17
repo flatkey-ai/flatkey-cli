@@ -59,6 +59,18 @@ test("runs generation and utility commands in json mode", async (t) => {
   assert.ok(requests.some((request) => request.url === "/v1/audio/generations"));
 });
 
+test("prints json errors to stderr in json mode", async () => {
+  const result = await runCliAllowFailure(["credits", "--json"]);
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: {
+      message: "Missing Flatkey API key. Run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.",
+    },
+  });
+});
+
 function listen(server) {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 }
@@ -83,6 +95,26 @@ function runCli(args) {
         return;
       }
       resolve({ stdout, stderr });
+    });
+  });
+}
+
+function runCliAllowFailure(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [BIN, ...args], {
+      env: { ...process.env, FLATKEY_API_KEY: "" },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code, stdout, stderr });
     });
   });
 }
