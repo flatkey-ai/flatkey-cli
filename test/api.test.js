@@ -175,11 +175,19 @@ test("plans available model list request from new-api relay route", async () => 
     data: [{ id: "gpt-5.5", object: "model", owned_by: "flatkey" }],
   });
 
-  await getModels({ apiKey: "env-key", baseUrl: "https://router.flatkey.ai", fetch });
+  await getModels({ apiKey: "env-key", fetch });
 
-  assert.equal(calls[0].url, "https://router.flatkey.ai/v1/available_models");
+  assert.equal(calls[0].url, "https://console.flatkey.ai/v1/available_models");
   assert.equal(calls[0].init.method, "GET");
   assert.equal(calls[0].init.headers.Authorization, "Bearer env-key");
+});
+
+test("honors explicit base url for available model list request", async () => {
+  const { fetch, calls } = fetchRecorder({ success: true, object: "list", data: [] });
+
+  await getModels({ apiKey: "env-key", baseUrl: "https://router.test", fetch });
+
+  assert.equal(calls[0].url, "https://router.test/v1/available_models");
 });
 
 test("plans dry-run requests for target media models", () => {

@@ -1,4 +1,5 @@
 export const DEFAULT_BASE_URL = "https://router.flatkey.ai";
+export const DEFAULT_MODELS_BASE_URL = "https://console.flatkey.ai";
 
 export class FlatkeyError extends Error {
   constructor(message, { status } = {}) {
@@ -84,7 +85,10 @@ export function getStatus(options) {
 }
 
 export function getModels(options) {
-  return requestJson(options, "/v1/available_models");
+  return requestJson({
+    ...options,
+    baseUrl: options.baseUrl ?? DEFAULT_MODELS_BASE_URL,
+  }, "/v1/available_models");
 }
 
 async function postJson(options, path, payload) {
