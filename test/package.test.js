@@ -18,3 +18,12 @@ test("release channel docs exist", async () => {
   await access("release/deb/README.md", constants.R_OK);
   await access("release/msi/README.md", constants.R_OK);
 });
+
+test("github workflow publishes npm with secret token", async () => {
+  const workflow = await readFile(".github/workflows/npm-publish.yml", "utf8");
+
+  assert.match(workflow, /on:\n\s+workflow_dispatch:/);
+  assert.match(workflow, /tags:\n\s+- "v\*"/);
+  assert.match(workflow, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
+  assert.match(workflow, /npm publish --access public/);
+});
