@@ -4,7 +4,7 @@
   "description": "Flatkey media generation CLI for image, video, audio, credits, status, and models.",
   "type": "module",
   "bin": {
-    "flatkey": "./bin/flatkey.js"
+    "flatkey": "bin/flatkey.js"
   },
   "scripts": {
     "test": "node --test"

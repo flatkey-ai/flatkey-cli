@@ -8,7 +8,7 @@ test("package exposes @flatkey-ai/cli flatkey binary", async () => {
   const binStat = await stat("bin/flatkey.js");
 
   assert.equal(pkg.name, "@flatkey-ai/cli");
-  assert.equal(pkg.bin.flatkey, "./bin/flatkey.js");
+  assert.equal(pkg.bin.flatkey, "bin/flatkey.js");
   assert.ok((binStat.mode & 0o111) !== 0);
 });
 
