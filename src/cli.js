@@ -18,6 +18,9 @@ export function parseArgv(argv) {
   if (!group) {
     return { group: "help", action: undefined, options: {} };
   }
+  if (group === "--version" || group === "-v") {
+    return { group: "version", action: undefined, options: {} };
+  }
   if (!COMMANDS.has(group)) {
     throw new Error(`Unknown command: ${group}`);
   }
@@ -87,7 +90,8 @@ export async function runCommand(command, deps = {}) {
     return command.options.ai ? getAiHelp() : getHumanHelp();
   }
   if (command.group === "version") {
-    return { version: await readPackageVersion() };
+    const version = await readPackageVersion();
+    return command.options.json ? { version } : version;
   }
 
   if (command.group === "models") {

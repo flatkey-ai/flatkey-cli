@@ -75,6 +75,19 @@ test("parses ai help", () => {
   });
 });
 
+test("parses global version aliases", () => {
+  assert.deepEqual(parseArgv(["--version"]), {
+    group: "version",
+    action: undefined,
+    options: {},
+  });
+  assert.deepEqual(parseArgv(["-v"]), {
+    group: "version",
+    action: undefined,
+    options: {},
+  });
+});
+
 test("rejects unknown commands", () => {
   assert.throws(
     () => parseArgv(["wat"]),
@@ -85,7 +98,8 @@ test("rejects unknown commands", () => {
 test("version command matches package version", async () => {
   const pkg = JSON.parse(await (await import("node:fs/promises")).readFile("package.json", "utf8"));
 
-  assert.deepEqual(await runCommand({ group: "version", options: {} }), {
+  assert.equal(await runCommand({ group: "version", options: {} }), pkg.version);
+  assert.deepEqual(await runCommand({ group: "version", options: { json: true } }), {
     version: pkg.version,
   });
 });
