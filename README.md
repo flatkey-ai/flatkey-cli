@@ -2,6 +2,8 @@
 
 Unified Flatkey CLI for media workers. Generate images, videos, and audio through Flatkey credits.
 
+Website: [flatkey.ai](https://flatkey.ai/?utm_source=github&utm_medium=readme&utm_campaign=flatkey_cli)
+
 ## Install
 
 ```bash
