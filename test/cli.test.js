@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseArgv } from "../src/cli.js";
+import { parseArgv, runCommand } from "../src/cli.js";
 
 test("parses image generation with prompt and json mode", () => {
   const command = parseArgv(["image", "generate", "--prompt", "city at dawn", "--json"]);
@@ -80,4 +80,12 @@ test("rejects unknown commands", () => {
     () => parseArgv(["wat"]),
     /Unknown command: wat/,
   );
+});
+
+test("version command matches package version", async () => {
+  const pkg = JSON.parse(await (await import("node:fs/promises")).readFile("package.json", "utf8"));
+
+  assert.deepEqual(await runCommand({ group: "version", options: {} }), {
+    version: pkg.version,
+  });
 });

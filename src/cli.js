@@ -87,7 +87,7 @@ export async function runCommand(command, deps = {}) {
     return command.options.ai ? getAiHelp() : getHumanHelp();
   }
   if (command.group === "version") {
-    return { version: "0.1.0" };
+    return { version: await readPackageVersion() };
   }
 
   if (command.group === "models") {
@@ -243,4 +243,10 @@ async function handleModels(command, deps) {
 function formatHuman(result) {
   if (typeof result === "string") return result;
   return JSON.stringify(result, null, 2);
+}
+
+async function readPackageVersion() {
+  const { readFile } = await import("node:fs/promises");
+  const packageUrl = new URL("../package.json", import.meta.url);
+  return JSON.parse(await readFile(packageUrl, "utf8")).version;
 }
