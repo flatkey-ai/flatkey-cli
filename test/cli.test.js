@@ -52,6 +52,17 @@ test("parses text generation with dry-run", () => {
   });
 });
 
+test("parses output aliases", () => {
+  assert.equal(
+    parseArgv(["image", "generate", "--prompt", "x", "--output", "out.png"]).options.output,
+    "out.png",
+  );
+  assert.equal(
+    parseArgv(["video", "generate", "--prompt", "x", "-o", "clip.mp4"]).options.output,
+    "clip.mp4",
+  );
+});
+
 test("parses ai help", () => {
   const command = parseArgv(["help", "--ai"]);
 

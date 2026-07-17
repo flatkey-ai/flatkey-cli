@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 const BIN = new URL("../bin/flatkey.js", import.meta.url).pathname;
@@ -82,6 +85,58 @@ test("dry-run returns planned request without calling network", async () => {
   assert.equal(payload.request.url, "https://router.flatkey.ai/v1/images/generations");
   assert.equal(payload.request.body.model, "gpt-image-2");
   assert.equal(result.stderr, "");
+});
+
+test("generation commands write explicit output files", async (t) => {
+  const server = createServer((request, response) => {
+    request.on("data", () => {});
+    request.on("end", () => {
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/v1/images/generations") {
+        response.end(JSON.stringify({
+          data: [{ b64_json: Buffer.from("image-file").toString("base64") }],
+        }));
+      } else if (request.url === "/v1/chat/completions") {
+        response.end(JSON.stringify({ choices: [{ message: { content: "text-file" } }] }));
+      } else {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ error: { message: "not found" } }));
+      }
+    });
+  });
+  t.after(() => server.close());
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-output-"));
+  const imageOutput = join(dir, "poster.png");
+  const textOutput = join(dir, "headline.txt");
+
+  const common = ["--base-url", baseUrl, "--api-key", "test-key", "--json"];
+  const image = await runCli([
+    "image",
+    "generate",
+    "--model",
+    "gpt-image-2",
+    "--prompt",
+    "poster",
+    "--output",
+    imageOutput,
+    ...common,
+  ]);
+  const text = await runCli([
+    "text",
+    "generate",
+    "--prompt",
+    "headline",
+    "-o",
+    textOutput,
+    ...common,
+  ]);
+
+  assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ path: imageOutput }]);
+  assert.equal(await readFile(imageOutput, "utf8"), "image-file");
+  assert.equal(JSON.parse(text.stdout).output, textOutput);
+  assert.equal(await readFile(textOutput, "utf8"), "text-file");
 });
 
 test("prints json errors to stderr in json mode", async () => {

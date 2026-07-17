@@ -12,10 +12,10 @@ JSON mode:
 - ASCII animation and human logs are disabled.
 
 Commands:
-- flatkey image generate --prompt "<prompt>" --json [--model <model>] [--size 1024x1024] [--out flatkey-output]
-- flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--duration 8] [--aspect 16:9]
-- flatkey audio generate --prompt "<prompt>" --json [--model tts-1] [--voice alloy] [--format mp3]
-- flatkey text generate --prompt "<prompt>" --json [--model gpt-5.5]
+- flatkey image generate --prompt "<prompt>" --json [--model <model>] [--output image.png]
+- flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--output video.mp4]
+- flatkey audio generate --prompt "<prompt>" --json [--model tts-1] [--output audio.mp3]
+- flatkey text generate --prompt "<prompt>" --json [--model gpt-5.5] [--output text.txt]
 - flatkey credits --json
 - flatkey status --json
 - flatkey models --json [--type image|video|audio|text]
@@ -48,6 +48,7 @@ Commands:
 
 Global options:
   --json                         Print machine-readable JSON
+  --output, -o <file>             Write generated output to a local file
   --base-url <url>               Override Flatkey router URL
 `;
 }

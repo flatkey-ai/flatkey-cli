@@ -30,6 +30,7 @@ export FLATKEY_API_KEY=<key>
 
 ```bash
 flatkey image generate --prompt "magazine cover" --json
+flatkey image generate --prompt "magazine cover" --output cover.png --json
 flatkey video generate --prompt "product launch clip" --json
 flatkey audio generate --prompt "30 second voiceover" --json
 flatkey text generate --prompt "write a headline" --model gpt-5.5 --json

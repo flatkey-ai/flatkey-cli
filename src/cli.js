@@ -37,6 +37,15 @@ function parseOptions(tokens) {
   const options = {};
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
+    if (token === "-o") {
+      const output = tokens[index + 1];
+      if (!output || output.startsWith("-")) {
+        throw new Error("Missing value for -o.");
+      }
+      options.output = output;
+      index += 1;
+      continue;
+    }
     if (!token.startsWith("--")) {
       throw new Error(`Unexpected argument: ${token}`);
     }
@@ -149,12 +158,16 @@ async function handleGenerate(command, deps) {
           ? await generateAudio(options)
           : await generateText(options);
     if (command.group === "text") {
-      return { kind: command.group, text: extractText(response), response };
+      const text = extractText(response);
+      const output = await writeTextOutput(text, command.options.output);
+      return { kind: command.group, text, output, response };
     }
     const artifacts = await persistArtifacts({
       kind: command.group,
       response,
       outDir: command.options.out ?? "flatkey-output",
+      output: command.options.output,
+      fetch: deps.fetch,
     });
     return { kind: command.group, artifacts, response };
   } finally {
@@ -167,6 +180,15 @@ function extractText(response) {
     ?? response?.output_text
     ?? response?.text
     ?? "";
+}
+
+async function writeTextOutput(text, output) {
+  if (!output) return undefined;
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  await mkdir(dirname(output), { recursive: true });
+  await writeFile(output, text);
+  return output;
 }
 
 function redactRequest(request) {
