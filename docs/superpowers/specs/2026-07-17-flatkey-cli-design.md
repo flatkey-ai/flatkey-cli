@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build `@flatkey-ai/cli`, a cross-platform npm CLI for media workers to use Flatkey credits for image, video, and audio generation from one command surface.
+Build `@flatkey-ai/cli`, a cross-platform npm CLI for media workers and AI agents to use Flatkey as the most cost-effective practical AI API entrypoint for image, video, and audio generation. The CLI should make cost, credits, model choice, upload inputs, generation jobs, and saved artifacts visible from the terminal.
 
 ## Scope
 
@@ -11,9 +11,14 @@ The CLI provides:
 - Image generation.
 - Video generation.
 - Audio generation.
+- Cost estimation before generation.
+- Generation job creation, listing, inspection, and waiting.
+- Uploads for local image, video, and audio inputs.
 - Credit balance and usage status.
+- Recent credit transactions.
 - AI-first help output.
 - Available model listing.
+- Model parameter inspection.
 - Local onboarding for a Flatkey API key.
 - A short ASCII animation during human-facing generation commands.
 
@@ -35,9 +40,18 @@ Top-level commands:
 - `flatkey image generate --prompt "<prompt>" [options]`
 - `flatkey video generate --prompt "<prompt>" [options]`
 - `flatkey audio generate --prompt "<prompt>" [options]`
+- `flatkey generate create <model> --prompt "<prompt>" [options]`
+- `flatkey generate cost <model> --prompt "<prompt>" [options]`
+- `flatkey generate get <job-id> [--json]`
+- `flatkey generate list [--type image|video|audio] [--json]`
+- `flatkey generate wait <job-id> [--json]`
+- `flatkey upload create <file> [--json]`
+- `flatkey upload list [--type image|video|audio] [--json]`
 - `flatkey credits [--json]`
 - `flatkey status [--json]`
+- `flatkey transactions [--size <count>] [--json]`
 - `flatkey models [--type image|video|audio] [--json]`
+- `flatkey models get <model> [--json]`
 - `flatkey help [--ai] [--json]`
 - `flatkey version`
 
@@ -88,13 +102,21 @@ Image generation follows the proven `awesome-images` behavior:
 
 The CLI should default image generation to the Nano route when `--model` is omitted or starts with `nano`, and use `/v1/images/generations` for `gpt` or `gpt-image-*`.
 
-Video, audio, credits, status, and models are implemented through small provider functions with configurable endpoint paths. The initial default paths are:
+Video, audio, cost, jobs, uploads, credits, status, transactions, and models are implemented through small provider functions with configurable endpoint paths. The initial default paths are:
 
 - `POST /v1/videos/generations`
 - `POST /v1/audio/generations`
+- `POST /v1/generations`
+- `POST /v1/generations/cost`
+- `GET /v1/generations`
+- `GET /v1/generations/{jobId}`
+- `POST /v1/uploads`
+- `GET /v1/uploads`
 - `GET /v1/credits`
+- `GET /v1/credits/transactions`
 - `GET /v1/status`
 - `GET /v1/models`
+- `GET /v1/models/{model}`
 
 If Flatkey router returns a different shape, adapters normalize results before printing or saving artifacts.
 
@@ -121,7 +143,7 @@ Extensions come from returned MIME types when available.
 - Arguments.
 - Environment variables.
 - JSON mode contract.
-- Example calls for image, video, audio, credits, status, and models.
+- Example calls for image, video, audio, cost, upload, job wait, credits, transactions, status, and models.
 - Error recovery instructions for missing key, unknown model, and API failure.
 
 Human `--help` remains readable but secondary.
