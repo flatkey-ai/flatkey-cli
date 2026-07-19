@@ -7,6 +7,8 @@
 
 Creative generation from the terminal for media teams and AI agents. Generate images, videos, audio, and text through one Flatkey credit balance.
 
+Languages: [English](README.md) | [简体中文](docs/readme/README.zh-CN.md) | [日本語](docs/readme/README.ja-JP.md)
+
 Website: [flatkey.ai](https://flatkey.ai/?utm_source=github&utm_medium=readme&utm_campaign=flatkey_cli)
 
 ```bash
