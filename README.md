@@ -222,6 +222,10 @@ npm test
 node bin/flatkey.js --version
 ```
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=flatkey-ai/flatkey-cli&type=Date)](https://www.star-history.com/#flatkey-ai/flatkey-cli&Date)
+
 ## Links
 
 - Website: [flatkey.ai](https://flatkey.ai/?utm_source=github&utm_medium=readme&utm_campaign=flatkey_cli_links)
