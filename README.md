@@ -15,6 +15,7 @@ export FLATKEY_API_KEY=<your-flatkey-api-key>
 
 flatkey image generate --prompt "editorial cover, neon city at dawn" -o cover.png
 flatkey video generate --prompt "cinematic product launch clip" --model seedance2 -o launch.mp4
+flatkey audio generate --prompt "你好，这是 Flatkey 的配音测试" -o speech.mp3
 flatkey models --json
 flatkey credits --json
 ```
@@ -85,11 +86,41 @@ flatkey video generate \
 
 ### Generate Audio
 
+Text to speech:
+
 ```bash
 flatkey audio generate \
-  --prompt "30 second confident product voiceover" \
-  --model gemini-2.5-flash-preview-tts \
-  -o voiceover.mp3
+  --prompt "你好，这是 Flatkey 网关的语音测试。" \
+  --voice-id EXAVITQu4vr4xnSDxMaL \
+  --model eleven_multilingual_v2 \
+  --stability 0.5 \
+  --similarity-boost 0.75 \
+  --style 0 \
+  -o speech.mp3
+```
+
+List voices:
+
+```bash
+flatkey audio voices --json
+```
+
+Sound effects:
+
+```bash
+flatkey audio sfx \
+  --prompt "glass shattering on the floor" \
+  --duration 3 \
+  -o sfx.mp3
+```
+
+Music:
+
+```bash
+flatkey audio music \
+  --prompt "calm ambient piano, sad mood" \
+  --music-length-ms 10000 \
+  -o music.mp3
 ```
 
 ### Generate Text
@@ -125,7 +156,7 @@ Useful current defaults:
 | --- | --- |
 | Image | `gpt-image-2`, `nano-banana-pro-preview`, Gemini image models |
 | Video | `seedance2`, `veo-3`, `veo-3-fast` |
-| Audio | Gemini TTS models, `tts-1`, `gpt-4o-mini-tts` |
+| Audio | `eleven_multilingual_v2`, ElevenLabs voices, sound effects, music |
 | Text | `gpt-5.5`, Claude, Gemini, GLM, Grok models |
 
 `models` reads from the Flatkey console model registry. Generation calls use the Flatkey router.
@@ -144,6 +175,7 @@ Agent rules:
 - Always pass `--json` for machine-readable output.
 - Use `--output` / `-o` when the generated file path matters.
 - Call `flatkey models --json` before choosing a model.
+- Call `flatkey audio voices --json` before choosing a TTS `voice_id`.
 - Use `--dry-run` to inspect request shape without spending credits.
 
 Example dry run:
@@ -160,6 +192,7 @@ flatkey video generate \
 
 - Generation router: `https://router.flatkey.ai`
 - Model registry: `https://console.flatkey.ai/v1/available_models`
+- Voice registry: `https://router.flatkey.ai/v1/voices`
 
 Override router only when developing or testing:
 

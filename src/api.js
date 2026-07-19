@@ -53,16 +53,50 @@ export function planVideoRequest(options) {
 }
 
 export function generateAudio(options) {
-  return requestJsonFromPlan(options, planAudioRequest(options));
+  return requestBinaryArtifactFromPlan(options, planAudioRequest(options));
 }
 
 export function planAudioRequest(options) {
-  return planJsonPost(options, "/v1/audio/generations", cleanObject({
-    model: options.model ?? "tts-1",
-    prompt: options.prompt,
-    voice: options.voice,
-    format: options.format,
+  const voiceId = optionValue(options, "voiceId", "voice_id") ?? "EXAVITQu4vr4xnSDxMaL";
+  return planJsonPost(options, `/v1/text-to-speech/${encodeURIComponent(voiceId)}`, cleanObject({
+    text: options.text ?? options.prompt,
+    model_id: options.model ?? options.model_id ?? "eleven_multilingual_v2",
+    voice_settings: cleanObject({
+      stability: parseOptionalFloat(options.stability),
+      similarity_boost: parseOptionalFloat(optionValue(options, "similarityBoost", "similarity_boost")),
+      style: parseOptionalFloat(options.style),
+    }),
   }));
+}
+
+export function generateAudioSfx(options) {
+  return requestBinaryArtifactFromPlan(options, planAudioSfxRequest(options));
+}
+
+export function planAudioSfxRequest(options) {
+  return planJsonPost(options, "/v1/sound-generation", cleanObject({
+    text: options.text ?? options.prompt,
+    duration_seconds: parseOptionalFloat(optionValue(options, "durationSeconds", "duration_seconds", "duration")),
+  }));
+}
+
+export function generateAudioMusic(options) {
+  return requestBinaryArtifactFromPlan(options, planAudioMusicRequest(options));
+}
+
+export function planAudioMusicRequest(options) {
+  return planJsonPost(options, "/v1/music", cleanObject({
+    prompt: options.prompt,
+    music_length_ms: parseOptionalInteger(optionValue(options, "musicLengthMs", "music_length_ms")),
+  }));
+}
+
+export function getVoices(options) {
+  return requestJson(options, "/v1/voices");
+}
+
+export function planVoicesRequest(options) {
+  return planRequest(options, "/v1/voices");
 }
 
 export function generateText(options) {
@@ -128,6 +162,24 @@ async function requestJsonFromPlan(options, plan) {
   return body;
 }
 
+async function requestBinaryArtifactFromPlan(options, plan) {
+  const fetchImpl = options.fetch ?? fetch;
+  const response = await fetchImpl(plan.url, {
+    method: plan.method,
+    headers: plan.headers,
+    body: plan.body === undefined ? undefined : JSON.stringify(plan.body),
+  });
+  if (!response.ok) {
+    const body = await readJson(response);
+    throw new FlatkeyError(extractErrorMessage(body, response.status), {
+      status: response.status,
+    });
+  }
+  return {
+    data: [{ data: Buffer.from(await response.arrayBuffer()).toString("base64") }],
+  };
+}
+
 async function requestJson(options, path, init = {}) {
   return requestJsonFromPlan(options, planRequest(options, path, {
     method: init.method ?? "GET",
@@ -157,6 +209,18 @@ function jsonHeaders(apiKey) {
 function parseOptionalInteger(value) {
   if (value === undefined) return undefined;
   return Number.parseInt(value, 10);
+}
+
+function parseOptionalFloat(value) {
+  if (value === undefined) return undefined;
+  return Number.parseFloat(value);
+}
+
+function optionValue(options, ...keys) {
+  for (const key of keys) {
+    if (options[key] !== undefined) return options[key];
+  }
+  return undefined;
 }
 
 function cleanObject(value) {

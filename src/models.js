@@ -6,8 +6,11 @@ const BUNDLED_MODELS = [
   { id: "veo-3-fast", type: "video" },
   { id: "seedance2", type: "video" },
   { id: "gpt-5.5", type: "text" },
-  { id: "tts-1", type: "audio" },
-  { id: "gpt-4o-mini-tts", type: "audio" },
+  { id: "eleven_multilingual_v2", type: "audio" },
+  { id: "eleven_turbo_v2_5", type: "audio" },
+  { id: "eleven_flash_v2_5", type: "audio" },
+  { id: "sound-generation", type: "audio" },
+  { id: "music", type: "audio" },
 ];
 
 export function getBundledModels(type) {

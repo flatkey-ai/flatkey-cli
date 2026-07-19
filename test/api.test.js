@@ -11,7 +11,10 @@ import {
   getModels,
   getStatus,
   planImageRequest,
+  planAudioMusicRequest,
   planTextRequest,
+  planAudioSfxRequest,
+  planVoicesRequest,
   planVideoRequest,
 } from "../src/api.js";
 
@@ -22,6 +25,9 @@ function fetchRecorder(responseBody = { ok: true }) {
     return {
       ok: true,
       status: 200,
+      async arrayBuffer() {
+        return Buffer.from("binary");
+      },
       async json() {
         return responseBody;
       },
@@ -138,20 +144,64 @@ test("builds audio generation request", async () => {
   await generateAudio({
     apiKey: "key",
     baseUrl: "https://router.test",
-    model: "tts-1",
+    model: "eleven_multilingual_v2",
     prompt: "voiceover",
-    voice: "alloy",
-    format: "mp3",
+    voiceId: "voice-123",
+    stability: "0.5",
+    similarityBoost: "0.75",
+    style: "0",
     fetch,
   });
 
-  assert.equal(calls[0].url, "https://router.test/v1/audio/generations");
+  assert.equal(calls[0].url, "https://router.test/v1/text-to-speech/voice-123");
   assert.deepEqual(JSON.parse(calls[0].init.body), {
-    model: "tts-1",
-    prompt: "voiceover",
-    voice: "alloy",
-    format: "mp3",
+    text: "voiceover",
+    model_id: "eleven_multilingual_v2",
+    voice_settings: {
+      stability: 0.5,
+      similarity_boost: 0.75,
+      style: 0,
+    },
   });
+});
+
+test("builds audio sfx, music, and voices requests", () => {
+  assert.equal(planAudioSfxRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    prompt: "glass shattering",
+    duration: "3",
+  }).url, "https://router.test/v1/sound-generation");
+  assert.deepEqual(planAudioSfxRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    prompt: "glass shattering",
+    duration: "3",
+  }).body, {
+    text: "glass shattering",
+    duration_seconds: 3,
+  });
+
+  assert.equal(planAudioMusicRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    prompt: "calm ambient piano",
+    musicLengthMs: "10000",
+  }).url, "https://router.test/v1/music");
+  assert.deepEqual(planAudioMusicRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    prompt: "calm ambient piano",
+    musicLengthMs: "10000",
+  }).body, {
+    prompt: "calm ambient piano",
+    music_length_ms: 10000,
+  });
+
+  assert.equal(planVoicesRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+  }).url, "https://router.test/v1/voices");
 });
 
 test("builds credits, status, and models requests", async () => {

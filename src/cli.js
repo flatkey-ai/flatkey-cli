@@ -103,7 +103,13 @@ export async function runCommand(command, deps = {}) {
   }
 
   if (["image", "video", "audio", "text"].includes(command.group)) {
-    if (command.action !== "generate") {
+    if (command.group === "audio" && command.action === "voices") {
+      return handleVoices(command, deps);
+    }
+    const validAction = command.group === "audio"
+      ? ["generate", "sfx", "music"].includes(command.action)
+      : command.action === "generate";
+    if (!validAction) {
       throw new Error(`Unknown action for ${command.group}: ${command.action}`);
     }
     return handleGenerate(command, { ...deps, stdout, stderr });
@@ -116,10 +122,14 @@ async function handleGenerate(command, deps) {
   const { resolveApiKey } = await import("./config.js");
   const {
     generateAudio,
+    generateAudioMusic,
+    generateAudioSfx,
     generateImage,
     generateText,
     generateVideo,
+    planAudioMusicRequest,
     planAudioRequest,
+    planAudioSfxRequest,
     planImageRequest,
     planTextRequest,
     planVideoRequest,
@@ -144,7 +154,11 @@ async function handleGenerate(command, deps) {
       : command.group === "video"
         ? planVideoRequest(options)
         : command.group === "audio"
-          ? planAudioRequest(options)
+          ? command.action === "sfx"
+            ? planAudioSfxRequest(options)
+            : command.action === "music"
+              ? planAudioMusicRequest(options)
+              : planAudioRequest(options)
           : planTextRequest(options);
     return { dryRun: true, kind: command.group, request: redactRequest(request) };
   }
@@ -159,7 +173,11 @@ async function handleGenerate(command, deps) {
       : command.group === "video"
         ? await generateVideo(options)
         : command.group === "audio"
-          ? await generateAudio(options)
+          ? command.action === "sfx"
+            ? await generateAudioSfx(options)
+            : command.action === "music"
+              ? await generateAudioMusic(options)
+              : await generateAudio(options)
           : await generateText(options);
     if (command.group === "text") {
       const text = extractText(response);
@@ -177,6 +195,20 @@ async function handleGenerate(command, deps) {
   } finally {
     animation.stop();
   }
+}
+
+async function handleVoices(command, deps) {
+  const { resolveApiKey } = await import("./config.js");
+  const { getVoices } = await import("./api.js");
+  const apiKey = await resolveApiKey({
+    apiKey: command.options.api_key,
+    env: deps.env ?? process.env,
+  });
+  return getVoices({
+    apiKey,
+    baseUrl: command.options.base_url,
+    fetch: deps.fetch,
+  });
 }
 
 function extractText(response) {

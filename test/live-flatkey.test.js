@@ -19,6 +19,36 @@ const cases = [
     },
   },
   {
+    name: "audio voices",
+    args: ["audio", "voices", "--json"],
+    paid: false,
+    expect: (payload) => {
+      assert.ok(Array.isArray(payload.voices));
+      assert.ok(payload.voices.length > 0);
+    },
+  },
+  {
+    name: "audio tts",
+    args: ["audio", "generate", "--prompt", "flatkey voice test", "--json"],
+    paid: true,
+    dryRun: true,
+    expect: (payload) => assert.equal(payload.request.url, "https://router.flatkey.ai/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL"),
+  },
+  {
+    name: "audio sfx",
+    args: ["audio", "sfx", "--prompt", "glass shattering", "--duration", "3", "--json"],
+    paid: true,
+    dryRun: true,
+    expect: (payload) => assert.equal(payload.request.url, "https://router.flatkey.ai/v1/sound-generation"),
+  },
+  {
+    name: "audio music",
+    args: ["audio", "music", "--prompt", "calm ambient piano", "--music-length-ms", "10000", "--json"],
+    paid: true,
+    dryRun: true,
+    expect: (payload) => assert.equal(payload.request.url, "https://router.flatkey.ai/v1/music"),
+  },
+  {
     name: "image gpt",
     args: ["image", "generate", "--model", "gpt-image-2", "--prompt", "one tiny red square icon", "--json"],
     paid: true,

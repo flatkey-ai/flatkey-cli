@@ -63,6 +63,44 @@ test("parses output aliases", () => {
   );
 });
 
+test("parses audio voice generation controls", () => {
+  const command = parseArgv([
+    "audio",
+    "generate",
+    "--prompt",
+    "hello",
+    "--voice-id",
+    "voice-123",
+    "--stability",
+    "0.5",
+    "--similarity-boost",
+    "0.75",
+    "--style",
+    "0",
+    "-o",
+    "speech.mp3",
+  ]);
+
+  assert.deepEqual(command, {
+    group: "audio",
+    action: "generate",
+    options: {
+      prompt: "hello",
+      voice_id: "voice-123",
+      stability: "0.5",
+      similarity_boost: "0.75",
+      style: "0",
+      output: "speech.mp3",
+    },
+  });
+});
+
+test("parses audio sfx, music, and voices actions", () => {
+  assert.equal(parseArgv(["audio", "sfx", "--prompt", "glass", "--duration", "3"]).action, "sfx");
+  assert.equal(parseArgv(["audio", "music", "--prompt", "piano", "--music-length-ms", "10000"]).action, "music");
+  assert.equal(parseArgv(["audio", "voices", "--json"]).action, "voices");
+});
+
 test("parses ai help", () => {
   const command = parseArgv(["help", "--ai"]);
 

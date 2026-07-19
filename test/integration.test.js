@@ -17,26 +17,36 @@ test("runs generation and utility commands in json mode", async (t) => {
     });
     request.on("end", () => {
       requests.push({ url: request.url, method: request.method, body });
-      response.setHeader("content-type", "application/json");
       if (request.url.startsWith("/v1beta/models/")) {
+        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/image.png" }] }));
       } else if (request.url === "/v1/video/generations") {
+        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/video.mp4" }] }));
-      } else if (request.url === "/v1/audio/generations") {
-        response.end(JSON.stringify({ data: [{ url: "https://cdn.test/audio.mp3" }] }));
+      } else if (request.url === "/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL") {
+        response.setHeader("content-type", "audio/mpeg");
+        response.end("audio-file");
       } else if (request.url === "/v1/chat/completions") {
+        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ choices: [{ message: { content: "headline" } }] }));
       } else if (request.url === "/v1/credits") {
+        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ remaining: 42, used: 8 }));
       } else if (request.url === "/v1/status") {
+        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ status: "ok" }));
       } else if (request.url === "/v1/available_models") {
+        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({
           success: true,
           object: "list",
           data: [{ id: "remote-image", object: "model", owned_by: "flatkey" }],
         }));
+      } else if (request.url === "/v1/voices") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ voices: [{ voice_id: "voice-123", name: "Rachel" }] }));
       } else {
+        response.setHeader("content-type", "application/json");
         response.statusCode = 404;
         response.end(JSON.stringify({ error: { message: "not found" } }));
       }
@@ -54,20 +64,23 @@ test("runs generation and utility commands in json mode", async (t) => {
   const credits = await runCli(["credits", ...common]);
   const status = await runCli(["status", ...common]);
   const models = await runCli(["models", ...common]);
+  const voices = await runCli(["audio", "voices", ...common]);
 
   assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ url: "https://cdn.test/image.png" }]);
   assert.deepEqual(JSON.parse(video.stdout).artifacts, [{ url: "https://cdn.test/video.mp4" }]);
-  assert.deepEqual(JSON.parse(audio.stdout).artifacts, [{ url: "https://cdn.test/audio.mp3" }]);
+  assert.equal(JSON.parse(audio.stdout).artifacts.length, 1);
+  assert.match(JSON.parse(audio.stdout).artifacts[0].path, /audio-01\.mp3$/);
   assert.equal(JSON.parse(text.stdout).text, "headline");
   assert.equal(JSON.parse(credits.stdout).remaining, 42);
   assert.equal(JSON.parse(status.stdout).status, "ok");
   assert.deepEqual(JSON.parse(models.stdout).models, [
     { id: "remote-image", type: "image", source: "remote" },
   ]);
+  assert.deepEqual(JSON.parse(voices.stdout).voices, [{ voice_id: "voice-123", name: "Rachel" }]);
   assert.equal(image.stderr, "");
   assert.ok(requests.some((request) => request.url.startsWith("/v1beta/models/")));
   assert.ok(requests.some((request) => request.url === "/v1/video/generations"));
-  assert.ok(requests.some((request) => request.url === "/v1/audio/generations"));
+  assert.ok(requests.some((request) => request.url === "/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL"));
   assert.ok(requests.some((request) => request.url === "/v1/chat/completions"));
 });
 
@@ -91,18 +104,63 @@ test("dry-run returns planned request without calling network", async () => {
   assert.equal(result.stderr, "");
 });
 
+test("audio dry-run supports tts, sfx, and music routes", async () => {
+  const tts = await runCli([
+    "audio",
+    "generate",
+    "--prompt",
+    "hello",
+    "--voice-id",
+    "voice-123",
+    "--dry-run",
+    "--json",
+  ]);
+  const sfx = await runCli([
+    "audio",
+    "sfx",
+    "--prompt",
+    "glass shattering",
+    "--duration",
+    "3",
+    "--dry-run",
+    "--json",
+  ]);
+  const music = await runCli([
+    "audio",
+    "music",
+    "--prompt",
+    "calm ambient piano",
+    "--music-length-ms",
+    "10000",
+    "--dry-run",
+    "--json",
+  ]);
+
+  assert.equal(JSON.parse(tts.stdout).request.url, "https://router.flatkey.ai/v1/text-to-speech/voice-123");
+  assert.equal(JSON.parse(sfx.stdout).request.url, "https://router.flatkey.ai/v1/sound-generation");
+  assert.equal(JSON.parse(sfx.stdout).request.body.duration_seconds, 3);
+  assert.equal(JSON.parse(music.stdout).request.url, "https://router.flatkey.ai/v1/music");
+  assert.equal(JSON.parse(music.stdout).request.body.music_length_ms, 10000);
+});
+
 test("generation commands write explicit output files", async (t) => {
   const server = createServer((request, response) => {
     request.on("data", () => {});
     request.on("end", () => {
       response.setHeader("content-type", "application/json");
       if (request.url === "/v1/images/generations") {
+        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({
           data: [{ b64_json: Buffer.from("image-file").toString("base64") }],
         }));
+      } else if (request.url === "/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL") {
+        response.setHeader("content-type", "audio/mpeg");
+        response.end("audio-file");
       } else if (request.url === "/v1/chat/completions") {
+        response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ choices: [{ message: { content: "text-file" } }] }));
       } else {
+        response.setHeader("content-type", "application/json");
         response.statusCode = 404;
         response.end(JSON.stringify({ error: { message: "not found" } }));
       }
@@ -113,6 +171,7 @@ test("generation commands write explicit output files", async (t) => {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const dir = await mkdtemp(join(tmpdir(), "flatkey-output-"));
   const imageOutput = join(dir, "poster.png");
+  const audioOutput = join(dir, "speech.mp3");
   const textOutput = join(dir, "headline.txt");
 
   const common = ["--base-url", baseUrl, "--api-key", "test-key", "--json"];
@@ -136,9 +195,20 @@ test("generation commands write explicit output files", async (t) => {
     textOutput,
     ...common,
   ]);
+  const audio = await runCli([
+    "audio",
+    "generate",
+    "--prompt",
+    "hello",
+    "-o",
+    audioOutput,
+    ...common,
+  ]);
 
   assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ path: imageOutput }]);
   assert.equal(await readFile(imageOutput, "utf8"), "image-file");
+  assert.deepEqual(JSON.parse(audio.stdout).artifacts, [{ path: audioOutput }]);
+  assert.equal(await readFile(audioOutput, "utf8"), "audio-file");
   assert.equal(JSON.parse(text.stdout).output, textOutput);
   assert.equal(await readFile(textOutput, "utf8"), "text-file");
 });
