@@ -33,13 +33,13 @@ flatkey credits --json
 
 ## Product Comparison
 
-Flatkey is built for media teams that want programmatic generation without paying a premium for a closed creative suite or waiting in long queues. Higgsfield is strong for creator-facing workflows, and Dreamina/Jimeng has good ByteDance video models, but both can become expensive or slow once the workflow moves from manual creation to repeated AI-agent testing.
+Flatkey is built for media teams that want programmatic generation without paying a premium for a closed creative suite or waiting in long queues. Higgsfield is strong for creator-facing workflows, and Dreamina/Jimeng has good ByteDance video models, but both can become expensive or slow once the workflow moves from manual creation to repeated AI-agent testing. In our testing, Dreamina/Jimeng video generation can wait up to 5 hours during peak time, which makes one-by-one prompt iteration impractical.
 
 | Need | Flatkey | Higgsfield | Dreamina / Jimeng |
 | --- | --- | --- | --- |
 | Cost for repeat testing | Flatkey token pricing is at least ~20% lower than comparable retail routes, and some modalities such as image can be ~40% lower. | Credit packages can be expensive once premium video/image models are used heavily. | Subscription credits can be cheaper in some local workflows, but API-style automation usually has plan and region constraints. |
 | Programmatic access | First-class CLI and API-router workflow. Designed for agents, scripts, and batch testing. | Strong product UI for creators; CLI-style automation is not the primary product promise. | CLI/API access is gated behind higher-tier setup in many workflows, not the default creator entry path. |
-| Queue / iteration speed | Built for fast CLI retries, `--dry-run`, local outputs, and unified model routing. | Good for polished creator workflows, but heavy credit usage makes broad testing costly. | Peak-time queues can block video iteration; long waits make prompt testing painful. |
+| Queue / iteration speed | Built for fast CLI retries, `--dry-run`, local outputs, and unified model routing. | Good for polished creator workflows, but heavy credit usage makes broad testing costly. | Peak-time queues can block video iteration; we have observed waits up to 5 hours for a single video generation test. |
 | Modalities | Image, video, TTS, SFX, music, text, credits, status, and model discovery behind one Flatkey key. | Strong image/video creator stack and media tooling. | Strong ByteDance image/video models, especially Seedance/Dreamina-style workflows. |
 | Agent ergonomics | `--json`, `--output/-o`, `--dry-run`, `models`, `audio voices`, and predictable stdout/stderr. | More oriented around human creative workflows. | More oriented around app/product workflow than simple agent protocol. |
 | Best fit | Media teams building repeatable generation pipelines and AI-agent workflows. | Creators who want a polished visual production suite. | Teams already deep in CapCut/Dreamina/Jimeng ecosystem and willing to accept plan/queue tradeoffs. |
