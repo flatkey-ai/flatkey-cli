@@ -84,6 +84,44 @@ test("runs generation and utility commands in json mode", async (t) => {
   assert.ok(requests.some((request) => request.url === "/v1/chat/completions"));
 });
 
+test("formats command output as human text by default", async (t) => {
+  const server = createServer((request, response) => {
+    request.on("data", () => {});
+    request.on("end", () => {
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/v1/available_models") {
+        response.end(JSON.stringify({ data: [{ id: "remote-image", type: "image" }] }));
+      } else if (request.url === "/v1/status") {
+        response.end(JSON.stringify({ status: "ok", remaining: 42 }));
+      } else if (request.url === "/v1/video/generations") {
+        response.end(JSON.stringify({ data: [{ url: "https://cdn.test/video.mp4" }] }));
+      } else {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ error: { message: "not found" } }));
+      }
+    });
+  });
+  t.after(() => server.close());
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const common = ["--base-url", baseUrl, "--api-key", "test-key"];
+
+  const models = await runCli(["models", ...common]);
+  const status = await runCli(["status", ...common]);
+  const video = await runCli(["video", "generate", "--prompt", "clip", ...common]);
+
+  assert.match(models.stdout, /Available models \(1\):/);
+  assert.match(models.stdout, /Model\s+Type\s+Source/);
+  assert.match(models.stdout, /remote-image\s+image\s+remote/);
+  assert.doesNotMatch(models.stdout, /^\{/);
+  assert.match(status.stdout, /Status: ok/);
+  assert.match(status.stdout, /Remaining: 42/);
+  assert.doesNotMatch(status.stdout, /^\{/);
+  assert.match(video.stdout, /Video generated:/);
+  assert.match(video.stdout, /URL: https:\/\/cdn\.test\/video\.mp4/);
+  assert.doesNotMatch(video.stdout, /^\{/);
+});
+
 test("credits and status normalize missing token API errors", async (t) => {
   const server = createServer((request, response) => {
     request.on("data", () => {});

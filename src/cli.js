@@ -576,7 +576,109 @@ async function handleModels(command, deps) {
 
 function formatHuman(result) {
   if (typeof result === "string") return result;
-  return JSON.stringify(result, null, 2);
+  if (!result || typeof result !== "object") return String(result);
+  if (result.dryRun && result.request) return formatDryRun(result);
+  if (result.kind) return formatGenerationResult(result);
+  if (Array.isArray(result.models)) return formatModels(result.models);
+  if (Array.isArray(result.voices)) return formatVoices(result.voices);
+  if (typeof result.authenticated === "boolean") return formatAuthStatus(result);
+  return formatKeyValues(result);
+}
+
+function formatDryRun(result) {
+  const lines = [
+    `Dry run: ${result.kind}`,
+    `${result.request.method ?? "GET"} ${result.request.url}`,
+  ];
+  if (result.request.body !== undefined) {
+    lines.push("Body:");
+    lines.push(JSON.stringify(result.request.body, null, 2));
+  }
+  return lines.join("\n");
+}
+
+function formatGenerationResult(result) {
+  if (result.kind === "text") {
+    const lines = [result.text || "(empty text)"];
+    if (result.output) lines.push(`Saved: ${result.output}`);
+    return lines.join("\n");
+  }
+  const artifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+  if (artifacts.length === 0) return `${titleCase(result.kind)} generated. No artifacts returned.`;
+  const lines = [`${titleCase(result.kind)} generated:`];
+  for (const artifact of artifacts) {
+    if (artifact.path) lines.push(`- Saved: ${artifact.path}`);
+    else if (artifact.url) lines.push(`- URL: ${artifact.url}`);
+    else lines.push(`- ${JSON.stringify(artifact)}`);
+  }
+  return lines.join("\n");
+}
+
+function formatModels(models) {
+  if (models.length === 0) return "No models available.";
+  return [
+    `Available models (${models.length}):`,
+    formatTable(
+      ["Model", "Type", "Source"],
+      models.map((model) => [
+        model.id,
+        model.type ?? "",
+        model.source ?? "",
+      ]),
+    ),
+  ].join("\n");
+}
+
+function formatVoices(voices) {
+  if (voices.length === 0) return "No voices available.";
+  const lines = [`Available voices (${voices.length}):`];
+  for (const voice of voices) {
+    const id = voice.voice_id ?? voice.id;
+    const name = voice.name ? `${voice.name} ` : "";
+    lines.push(`- ${name}${id ? `(${id})` : ""}`.trim());
+  }
+  return lines.join("\n");
+}
+
+function formatKeyValues(result) {
+  const entries = Object.entries(result);
+  if (entries.length === 0) return "OK";
+  return entries
+    .map(([key, value]) => `${humanLabel(key)}: ${formatScalar(value)}`)
+    .join("\n");
+}
+
+function formatScalar(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function humanLabel(key) {
+  return key
+    .replaceAll("_", " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+function titleCase(value) {
+  return String(value).replace(/^./, (char) => char.toUpperCase());
+}
+
+function formatTable(headers, rows) {
+  const widths = headers.map((header, index) => Math.max(
+    header.length,
+    ...rows.map((row) => String(row[index] ?? "").length),
+  ));
+  const line = (cells) => cells
+    .map((cell, index) => String(cell ?? "").padEnd(widths[index]))
+    .join("  ")
+    .trimEnd();
+  return [
+    line(headers),
+    line(widths.map((width) => "-".repeat(width))),
+    ...rows.map(line),
+  ].join("\n");
 }
 
 async function readPackageVersion() {
