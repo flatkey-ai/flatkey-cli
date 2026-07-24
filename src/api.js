@@ -1,5 +1,6 @@
 export const DEFAULT_BASE_URL = "https://router.flatkey.ai";
 export const DEFAULT_MODELS_BASE_URL = "https://console.flatkey.ai";
+export const DEFAULT_CONSOLE_URL = "https://console.flatkey.ai";
 
 export class FlatkeyError extends Error {
   constructor(message, { status } = {}) {
@@ -124,11 +125,17 @@ export function planTextRequest(options) {
 }
 
 export function getCredits(options) {
-  return requestJson(options, "/v1/credits");
+  return requestJson({
+    ...options,
+    baseUrl: options.baseUrl ?? DEFAULT_CONSOLE_URL,
+  }, "/v1/credits");
 }
 
 export function getStatus(options) {
-  return requestJson(options, "/v1/status");
+  return requestJson({
+    ...options,
+    baseUrl: options.baseUrl ?? DEFAULT_CONSOLE_URL,
+  }, "/v1/status");
 }
 
 export function getModels(options) {
@@ -136,6 +143,32 @@ export function getModels(options) {
     ...options,
     baseUrl: options.baseUrl ?? DEFAULT_MODELS_BASE_URL,
   }, "/v1/available_models");
+}
+
+export async function createDeviceAuthorization(options) {
+  return requestJson({
+    ...options,
+    baseUrl: options.consoleUrl ?? DEFAULT_CONSOLE_URL,
+  }, "/api/cli/device_authorizations", {
+    method: "POST",
+    body: JSON.stringify({
+      client_name: options.clientName ?? "flatkey-cli",
+      client_version: options.clientVersion,
+      device_id: options.deviceId,
+    }),
+  });
+}
+
+export async function pollDeviceAuthorization(options) {
+  return requestJson({
+    ...options,
+    baseUrl: options.consoleUrl ?? DEFAULT_CONSOLE_URL,
+  }, "/api/cli/device_authorizations/token", {
+    method: "POST",
+    body: JSON.stringify({
+      device_code: options.deviceCode,
+    }),
+  });
 }
 
 async function postJson(options, path, payload) {
@@ -257,7 +290,16 @@ async function readJson(response) {
 }
 
 function extractErrorMessage(body, status) {
-  if (typeof body?.error?.message === "string") return body.error.message;
-  if (typeof body?.message === "string") return body.message;
+  const message = typeof body?.error?.message === "string"
+    ? body.error.message
+    : typeof body?.message === "string"
+      ? body.message
+      : undefined;
+  if (message === "Token not provided") return missingApiKeyMessage();
+  if (message) return message;
   return `Flatkey API request failed with HTTP ${status}`;
+}
+
+function missingApiKeyMessage() {
+  return "Missing Flatkey API key. Create one at https://console.flatkey.ai/keys, then run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.";
 }

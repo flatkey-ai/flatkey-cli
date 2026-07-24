@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { parseArgv, runCommand } from "../src/cli.js";
@@ -132,6 +135,129 @@ test("parses ai help", () => {
   });
 });
 
+test("parses browser login commands", () => {
+  assert.deepEqual(parseArgv(["login", "--no-open", "--console-url", "https://console.test"]), {
+    group: "login",
+    action: undefined,
+    options: {
+      no_open: true,
+      console_url: "https://console.test",
+    },
+  });
+  assert.deepEqual(parseArgv(["auth", "status", "--json"]), {
+    group: "auth",
+    action: "status",
+    options: {
+      json: true,
+    },
+  });
+  assert.deepEqual(parseArgv(["logout"]), {
+    group: "logout",
+    action: undefined,
+    options: {},
+  });
+});
+
+test("browser login prints approval URL and saves returned API key", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  const fetchCalls = [];
+  let stdout = "";
+  const result = await runCommand({
+    group: "login",
+    action: undefined,
+    options: {
+      no_open: true,
+      console_url: "https://console.test",
+    },
+  }, {
+    configDir,
+    stdout: {
+      write(chunk) {
+        stdout += chunk;
+      },
+    },
+    sleep: async () => {},
+    fetch: async (url, init) => {
+      fetchCalls.push({ url, init });
+      if (url === "https://console.test/api/cli/device_authorizations") {
+        return jsonResponse({
+          device_code: "device-code",
+          verification_uri_complete: "https://console.test/cli/authorize?user_code=ABCD-EFGH",
+          expires_in: 600,
+          interval: 5,
+        });
+      }
+      return jsonResponse({
+        status: "approved",
+        api_key: "sk-login",
+        token_id: 9,
+        user_id: 7,
+      });
+    },
+  });
+
+  assert.match(stdout, /https:\/\/console\.test\/cli\/authorize\?user_code=ABCD-EFGH/);
+  assert.match(result, /Flatkey CLI authorized/);
+  assert.equal(fetchCalls.length, 2);
+  assert.equal(fetchCalls[0].url, "https://console.test/api/cli/device_authorizations");
+  assert.equal(fetchCalls[1].url, "https://console.test/api/cli/device_authorizations/token");
+
+  const saved = JSON.parse(await readFile(join(configDir, "config.json"), "utf8"));
+  assert.equal(saved.apiKey, "sk-login");
+  assert.equal(saved.auth.type, "device");
+  assert.equal(saved.auth.userId, 7);
+  assert.equal(saved.auth.tokenId, 9);
+  assert.equal(typeof saved.auth.deviceId, "string");
+});
+
+test("auth status masks saved key and logout removes only key", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  await runCommand({
+    group: "login",
+    action: undefined,
+    options: {
+      json: true,
+      no_open: true,
+      console_url: "https://console.test",
+    },
+  }, {
+    configDir,
+    sleep: async () => {},
+    fetch: async (url) => url.endsWith("/token")
+      ? jsonResponse({ status: "approved", api_key: "sk-login-secret", token_id: 9, user_id: 7 })
+      : jsonResponse({
+        device_code: "device-code",
+        verification_uri_complete: "https://console.test/cli/authorize?user_code=ABCD-EFGH",
+        expires_in: 600,
+        interval: 5,
+      }),
+  });
+
+  const status = await runCommand({
+    group: "auth",
+    action: "status",
+    options: { json: true },
+  }, {
+    configDir,
+    env: {},
+  });
+  assert.equal(status.authenticated, true);
+  assert.equal(status.source, "config");
+  assert.equal(status.key, "sk-log...cret");
+
+  await runCommand({ group: "logout", action: undefined, options: {} }, { configDir });
+  const afterLogout = await runCommand({
+    group: "auth",
+    action: "status",
+    options: { json: true },
+  }, {
+    configDir,
+    env: {},
+  });
+  assert.equal(afterLogout.authenticated, false);
+  assert.equal(afterLogout.auth?.deviceId, status.auth.deviceId);
+});
+
 test("parses per-command help forms", () => {
   assert.deepEqual(parseArgv(["video", "--help"]), {
     group: "video",
@@ -194,3 +320,13 @@ test("version command matches package version", async () => {
     version: pkg.version,
   });
 });
+
+function jsonResponse(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return body;
+    },
+  };
+}

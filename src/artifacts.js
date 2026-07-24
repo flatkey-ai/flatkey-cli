@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
 
 const DEFAULT_EXTENSIONS = {
@@ -25,6 +26,7 @@ export async function persistArtifacts({
   output,
   fetch: fetchImpl = fetch,
 }) {
+  output = expandHomePath(output);
   const items = extractItems(response);
   const artifacts = [];
   await mkdir(output ? dirname(output) : outDir, { recursive: true });
@@ -35,6 +37,13 @@ export async function persistArtifacts({
   }
 
   return artifacts;
+}
+
+function expandHomePath(path) {
+  if (typeof path !== "string") return path;
+  if (path === "~") return homedir();
+  if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+  return path;
 }
 
 async function persistItem({ kind, item, outDir, output, index, fetchImpl }) {

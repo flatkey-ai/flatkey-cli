@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -59,6 +59,21 @@ test("saves first artifact to explicit output path", async () => {
 
   assert.deepEqual(artifacts, [{ path: output }]);
   assert.equal(await readFile(output, "utf8"), "custom-bytes");
+});
+
+test("expands tilde in explicit output path", async (t) => {
+  const output = `~/flatkey-artifact-${Date.now()}.png`;
+  const expected = join(homedir(), output.slice(2));
+  t.after(() => rm(expected, { force: true }));
+
+  const artifacts = await persistArtifacts({
+    kind: "image",
+    response: { data: [{ b64_json: Buffer.from("home-bytes").toString("base64") }] },
+    output,
+  });
+
+  assert.deepEqual(artifacts, [{ path: expected }]);
+  assert.equal(await readFile(expected, "utf8"), "home-bytes");
 });
 
 test("adds numeric suffix for multiple artifacts with explicit output path", async () => {

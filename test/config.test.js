@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { getConfigPath, resolveApiKey, writeConfig } from "../src/config.js";
+import {
+  clearSavedApiKey,
+  ensureDeviceId,
+  getConfigPath,
+  readConfig,
+  resolveApiKey,
+  writeAuthConfig,
+  writeConfig,
+} from "../src/config.js";
 
 test("resolves api key from explicit option first", async () => {
   const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
@@ -72,4 +80,50 @@ test("writes config json with api key", async () => {
   assert.equal(configPath, getConfigPath(configDir));
   assert.equal(saved.apiKey, "written-key");
   assert.ok((fileStat.mode & 0o777) === 0o600 || process.platform === "win32");
+});
+
+test("writes browser auth config and preserves device id", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  const configPath = await writeAuthConfig({
+    apiKey: "sk-login",
+    auth: {
+      deviceId: "device-1",
+      userId: 7,
+      tokenId: 9,
+      loginAt: 123,
+    },
+    configDir,
+  });
+
+  assert.equal(await ensureDeviceId({ configDir }), "device-1");
+  assert.deepEqual(await readConfig(configDir), {
+    apiKey: "sk-login",
+    auth: {
+      type: "device",
+      deviceId: "device-1",
+      userId: 7,
+      tokenId: 9,
+      loginAt: 123,
+    },
+  });
+  assert.equal(configPath, getConfigPath(configDir));
+});
+
+test("logout removes saved api key but keeps auth metadata", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  await writeAuthConfig({
+    apiKey: "sk-login",
+    auth: { deviceId: "device-1", tokenId: 9 },
+    configDir,
+  });
+
+  await clearSavedApiKey({ configDir });
+
+  assert.deepEqual(await readConfig(configDir), {
+    auth: {
+      type: "device",
+      deviceId: "device-1",
+      tokenId: 9,
+    },
+  });
 });

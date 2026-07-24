@@ -3,15 +3,18 @@ const COMMANDS = new Set([
   "credits",
   "help",
   "image",
+  "login",
   "models",
   "onboard",
+  "logout",
+  "auth",
   "status",
   "text",
   "version",
   "video",
 ]);
 
-const GROUP_ACTIONS = new Set(["audio", "image", "text", "video"]);
+const GROUP_ACTIONS = new Set(["audio", "auth", "image", "text", "video"]);
 
 export function parseArgv(argv) {
   const [group, maybeAction, ...rest] = argv;
@@ -140,6 +143,21 @@ export async function runCommand(command, deps = {}) {
     return handleModels(command, deps);
   }
 
+  if (command.group === "login") {
+    return handleLogin(command, { ...deps, stdout, stderr });
+  }
+
+  if (command.group === "logout") {
+    return handleLogout(command, deps);
+  }
+
+  if (command.group === "auth") {
+    if (command.action !== "status") {
+      throw new Error(`Unknown action for auth: ${command.action}`);
+    }
+    return handleAuthStatus(command, deps);
+  }
+
   if (command.group === "credits" || command.group === "status") {
     return handleUtility(command, deps);
   }
@@ -158,6 +176,150 @@ export async function runCommand(command, deps = {}) {
   }
 
   throw new Error(`Unknown command: ${command.group}`);
+}
+
+async function handleLogin(command, deps) {
+  const { ensureDeviceId, writeAuthConfig } = await import("./config.js");
+  const { createDeviceAuthorization, pollDeviceAuthorization } = await import("./api.js");
+  const deviceId = await ensureDeviceId({ configDir: deps.configDir });
+  const version = await readPackageVersion();
+  const consoleUrl = command.options.console_url;
+  const authorization = await createDeviceAuthorization({
+    consoleUrl,
+    deviceId,
+    clientName: "flatkey-cli",
+    clientVersion: version,
+    fetch: deps.fetch,
+  });
+  const data = authorization?.data ?? authorization;
+  if (!data?.device_code || !data?.verification_uri_complete) {
+    throw new Error("Flatkey login failed: missing device authorization response.");
+  }
+
+  if (!command.options.json) {
+    deps.stdout?.write?.(`Open this URL to approve Flatkey CLI:\n${data.verification_uri_complete}\n\n`);
+  }
+  if (command.options.open !== false && command.options.no_open !== true) {
+    await openBrowser(data.verification_uri_complete, deps);
+  }
+
+  const initialIntervalMs = Math.max(Number(data.interval ?? 5), 5) * 1000;
+  const deadline = Date.now() + Math.max(Number(data.expires_in ?? 600), 1) * 1000;
+  const startedAt = Date.now();
+  while (Date.now() < deadline) {
+    await delay(nextLoginPollDelay(startedAt, initialIntervalMs), deps);
+    const poll = await pollDeviceAuthorization({
+      consoleUrl,
+      deviceCode: data.device_code,
+      fetch: deps.fetch,
+    });
+    const pollData = poll?.data ?? poll;
+    if (pollData?.status === "approved") {
+      if (!pollData.api_key) {
+        throw new Error("Flatkey login approved but no API key was returned.");
+      }
+      const configPath = await writeAuthConfig({
+        apiKey: pollData.api_key,
+        auth: {
+          deviceId,
+          userId: pollData.user_id,
+          tokenId: pollData.token_id,
+          loginAt: Math.floor(Date.now() / 1000),
+        },
+        configDir: deps.configDir,
+      });
+      return command.options.json
+        ? { success: true, configPath, tokenId: pollData.token_id, userId: pollData.user_id }
+        : `Flatkey CLI authorized. Saved config: ${configPath}`;
+    }
+    if (pollData?.status === "denied") {
+      throw new Error("Flatkey login denied.");
+    }
+    if (pollData?.status === "expired") {
+      throw new Error("Flatkey login expired. Run `flatkey login` again.");
+    }
+  }
+  throw new Error("Flatkey login timed out. Run `flatkey login` again.");
+}
+
+function nextLoginPollDelay(startedAt, initialIntervalMs) {
+  const elapsed = Date.now() - startedAt;
+  const base = elapsed < 30_000
+    ? initialIntervalMs
+    : elapsed < 120_000
+      ? Math.max(initialIntervalMs, 10_000)
+      : Math.max(initialIntervalMs, 15_000);
+  return base + Math.floor(Math.random() * 800);
+}
+
+async function delay(ms, deps = {}) {
+  const sleep = deps.sleep ?? ((duration) => new Promise((resolve) => setTimeout(resolve, duration)));
+  return sleep(ms);
+}
+
+async function openBrowser(url, deps = {}) {
+  if (deps.openBrowser) return deps.openBrowser(url);
+  const { spawn } = await import("node:child_process");
+  const platform = deps.platform ?? process.platform;
+  const command = platform === "darwin"
+    ? "open"
+    : platform === "win32"
+      ? "cmd"
+      : "xdg-open";
+  const args = platform === "win32" ? ["/c", "start", "", url] : [url];
+  try {
+    const child = spawn(command, args, { stdio: "ignore", detached: true });
+    child.unref();
+  } catch {
+    // Printed URL is enough when open is unavailable.
+  }
+}
+
+function maskKey(key) {
+  if (!key) return "";
+  if (key.length <= 8) return `${key.slice(0, 2)}****${key.slice(-2)}`;
+  return `${key.slice(0, 6)}...${key.slice(-4)}`;
+}
+
+function formatAuthStatus(status) {
+  if (!status.authenticated) return "Not authenticated";
+  return `Authenticated via ${status.source}: ${status.key}`;
+}
+
+async function handleLogout(command, deps = {}) {
+  const { clearSavedApiKey } = await import("./config.js");
+  const configPath = await clearSavedApiKey({ configDir: deps.configDir });
+  return command.options.json
+    ? { success: true, configPath }
+    : `Removed saved Flatkey API key from ${configPath}`;
+}
+
+async function handleAuthStatus(command, deps) {
+  const { readConfig, resolveApiKey } = await import("./config.js");
+  const saved = await readConfig(deps.configDir);
+  let apiKey;
+  try {
+    apiKey = await resolveApiKey({
+      apiKey: command.options.api_key,
+      env: deps.env ?? process.env,
+      configDir: deps.configDir,
+    });
+  } catch {
+    apiKey = "";
+  }
+  const status = {
+    authenticated: Boolean(apiKey),
+    source: command.options.api_key
+      ? "option"
+      : (deps.env ?? process.env).FLATKEY_API_KEY
+        ? "env"
+        : saved?.apiKey
+          ? "config"
+          : "none",
+    key: maskKey(apiKey),
+    auth: saved?.auth ?? null,
+  };
+  return command.options.json ? status : formatAuthStatus(status);
 }
 
 async function handleGenerate(command, deps) {
@@ -233,10 +395,31 @@ async function handleGenerate(command, deps) {
       output: command.options.output,
       fetch: deps.fetch,
     });
-    return { kind: command.group, artifacts, response };
+    return { kind: command.group, artifacts, response: scrubArtifactResponse(response) };
   } finally {
     animation.stop();
   }
+}
+
+function scrubArtifactResponse(value) {
+  if (Array.isArray(value)) return value.map(scrubArtifactResponse);
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string" && value.startsWith("data:")) return "<artifact omitted>";
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => {
+      if (["b64_json", "base64", "data"].includes(key) && typeof entry === "string") {
+        return [key, "<artifact omitted>"];
+      }
+      if (["url", "data_url", "dataUrl"].includes(key)
+        && typeof entry === "string"
+        && entry.startsWith("data:")) {
+        return [key, "<artifact omitted>"];
+      }
+      return [key, scrubArtifactResponse(entry)];
+    }),
+  );
 }
 
 async function handleVoices(command, deps) {
@@ -262,11 +445,21 @@ function extractText(response) {
 
 async function writeTextOutput(text, output) {
   if (!output) return undefined;
+  output = await expandHomePath(output);
   const { mkdir, writeFile } = await import("node:fs/promises");
   const { dirname } = await import("node:path");
   await mkdir(dirname(output), { recursive: true });
   await writeFile(output, text);
   return output;
+}
+
+async function expandHomePath(path) {
+  if (typeof path !== "string") return path;
+  if (path !== "~" && !path.startsWith("~/")) return path;
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  if (path === "~") return homedir();
+  return join(homedir(), path.slice(2));
 }
 
 function redactRequest(request) {

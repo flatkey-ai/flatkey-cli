@@ -84,6 +84,31 @@ test("runs generation and utility commands in json mode", async (t) => {
   assert.ok(requests.some((request) => request.url === "/v1/chat/completions"));
 });
 
+test("credits and status normalize missing token API errors", async (t) => {
+  const server = createServer((request, response) => {
+    request.on("data", () => {});
+    request.on("end", () => {
+      response.setHeader("content-type", "application/json");
+      response.statusCode = 401;
+      response.end(JSON.stringify({ message: "Token not provided" }));
+    });
+  });
+  t.after(() => server.close());
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const common = ["--base-url", baseUrl, "--api-key", "test-key"];
+  const credits = await runCliAllowFailure(["credits", ...common]);
+  const status = await runCliAllowFailure(["status", ...common]);
+
+  assert.equal(credits.code, 1);
+  assert.equal(status.code, 1);
+  assert.match(credits.stderr, /Missing Flatkey API key/);
+  assert.match(status.stderr, /Missing Flatkey API key/);
+  assert.doesNotMatch(credits.stderr, /Token not provided/);
+  assert.doesNotMatch(status.stderr, /Token not provided/);
+});
+
 test("dry-run returns planned request without calling network", async () => {
   const result = await runCli([
     "video",
@@ -223,6 +248,8 @@ test("generation commands write explicit output files", async (t) => {
 
   assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ path: imageOutput }]);
   assert.equal(await readFile(imageOutput, "utf8"), "image-file");
+  assert.equal(JSON.parse(image.stdout).response.data[0].b64_json, "<artifact omitted>");
+  assert.doesNotMatch(image.stdout, /aW1hZ2UtZmlsZQ==/);
   assert.deepEqual(JSON.parse(audio.stdout).artifacts, [{ path: audioOutput }]);
   assert.equal(await readFile(audioOutput, "utf8"), "audio-file");
   assert.equal(JSON.parse(text.stdout).output, textOutput);

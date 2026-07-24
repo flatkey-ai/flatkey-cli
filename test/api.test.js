@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   FlatkeyError,
+  createDeviceAuthorization,
   generateAudio,
   generateImage,
   generateText,
@@ -16,6 +17,7 @@ import {
   planAudioSfxRequest,
   planVoicesRequest,
   planVideoRequest,
+  pollDeviceAuthorization,
 } from "../src/api.js";
 
 function fetchRecorder(responseBody = { ok: true }) {
@@ -255,6 +257,46 @@ test("builds credits, status, and models requests", async () => {
   assert.equal(calls[2].init.headers.Authorization, "Bearer key");
 });
 
+test("credits and status default to console origin", async () => {
+  const { fetch, calls } = fetchRecorder({});
+
+  await getCredits({ apiKey: "key", fetch });
+  await getStatus({ apiKey: "key", fetch });
+
+  assert.equal(calls[0].url, "https://console.flatkey.ai/v1/credits");
+  assert.equal(calls[1].url, "https://console.flatkey.ai/v1/status");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+});
+
+test("creates and polls CLI device authorization on console API", async () => {
+  const { fetch, calls } = fetchRecorder({ status: "pending" });
+
+  await createDeviceAuthorization({
+    consoleUrl: "https://console.test",
+    clientName: "flatkey-cli",
+    clientVersion: "0.1.6",
+    deviceId: "device-1",
+    fetch,
+  });
+  await pollDeviceAuthorization({
+    consoleUrl: "https://console.test",
+    deviceCode: "device-code",
+    fetch,
+  });
+
+  assert.equal(calls[0].url, "https://console.test/api/cli/device_authorizations");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    client_name: "flatkey-cli",
+    client_version: "0.1.6",
+    device_id: "device-1",
+  });
+  assert.equal(calls[1].url, "https://console.test/api/cli/device_authorizations/token");
+  assert.deepEqual(JSON.parse(calls[1].init.body), {
+    device_code: "device-code",
+  });
+});
+
 test("plans available model list request from new-api relay route", async () => {
   const { fetch, calls } = fetchRecorder({
     success: true,
@@ -315,5 +357,22 @@ test("throws FlatkeyError with API message on HTTP failure", async () => {
   await assert.rejects(
     () => getCredits({ apiKey: "key", baseUrl: "https://router.test", fetch }),
     (error) => error instanceof FlatkeyError && /credits exhausted/.test(error.message),
+  );
+});
+
+test("normalizes token missing API message to onboarding guidance", async () => {
+  const fetch = async () => ({
+    ok: false,
+    status: 401,
+    async json() {
+      return { message: "Token not provided" };
+    },
+  });
+
+  await assert.rejects(
+    () => getStatus({ apiKey: "key", baseUrl: "https://router.test", fetch }),
+    (error) => error instanceof FlatkeyError
+      && /Missing Flatkey API key/.test(error.message)
+      && /https:\/\/console\.flatkey\.ai\/keys/.test(error.message),
   );
 });

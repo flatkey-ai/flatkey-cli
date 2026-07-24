@@ -2,7 +2,8 @@ export function getAiHelp() {
   return `Flatkey CLI protocol for agents
 
 Setup:
-- Prefer env: FLATKEY_API_KEY=<key>
+- Prefer browser auth: flatkey login
+- Or env: FLATKEY_API_KEY=<key>
 - Create a key at https://console.flatkey.ai/keys
 - Or save key: flatkey onboard --api-key <key>
 - Use --json for machine-readable output.
@@ -23,6 +24,9 @@ Commands:
 - flatkey credits --json
 - flatkey status --json
 - flatkey models --json [--type image|video|audio|text]
+- flatkey login [--no-open] [--console-url <url>]
+- flatkey logout
+- flatkey auth status --json
 - flatkey help --ai
 
 Environment:
@@ -41,6 +45,9 @@ export function getHumanHelp() {
   return `Usage: flatkey <command> [options]
 
 Commands:
+  login                         Authorize CLI in browser
+  logout                        Remove saved Flatkey API key
+  auth status                    Show saved auth state
   onboard --api-key <key>        Save Flatkey API key from https://console.flatkey.ai/keys
   image generate --prompt <txt>  Generate image
   video generate --prompt <txt>  Generate video
@@ -58,6 +65,7 @@ Global options:
   --json                         Print machine-readable JSON
   --output, -o <file>             Write generated output to a local file
   --base-url <url>               Override Flatkey router URL
+  --console-url <url>            Override Flatkey console URL for login
 
 Video options:
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
@@ -112,6 +120,17 @@ Options:
 
 Options:
   --json                         Print machine-readable JSON`,
+  auth: `Usage: flatkey auth <action> [options]
+
+Actions:
+  status                         Show saved auth state
+
+Options:
+  --json                         Print machine-readable JSON`,
+  "auth status": `Usage: flatkey auth status [options]
+
+Options:
+  --json                         Print machine-readable JSON`,
   help: `Usage: flatkey help [command] [options]
 
 Options:
@@ -138,6 +157,16 @@ Options:
 
 Options:
   --type <type>                  Filter: image, video, audio, or text
+  --json                         Print machine-readable JSON`,
+  login: `Usage: flatkey login [options]
+
+Options:
+  --no-open                      Print approval URL without opening a browser
+  --console-url <url>            Override Flatkey console URL
+  --json                         Print machine-readable JSON`,
+  logout: `Usage: flatkey logout [options]
+
+Options:
   --json                         Print machine-readable JSON`,
   onboard: `Usage: flatkey onboard --api-key <key>
 
