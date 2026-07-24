@@ -86,21 +86,23 @@ test("runs generation and utility commands in json mode", async (t) => {
 
 test("dry-run returns planned request without calling network", async () => {
   const result = await runCli([
-    "image",
+    "video",
     "generate",
-    "--prompt",
-    "poster",
-    "--model",
-    "gpt-image-2",
+    "--prompt", "clip",
+    "--ratio", "21:9",
+    "--resolution", "1080p",
     "--dry-run",
     "--json",
   ]);
 
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.dryRun, true);
-  assert.equal(payload.kind, "image");
-  assert.equal(payload.request.url, "https://router.flatkey.ai/v1/images/generations");
-  assert.equal(payload.request.body.model, "gpt-image-2");
+  assert.equal(payload.kind, "video");
+  assert.equal(payload.request.url, "https://router.flatkey.ai/v1/video/generations");
+  assert.equal(payload.request.body.ratio, "21:9");
+  assert.equal(payload.request.body.aspect, "21:9");
+  assert.equal(payload.request.body.resolution, "1080p");
+  assert.equal(payload.request.body.quality, "1080p");
   assert.equal(result.stderr, "");
 });
 
@@ -141,6 +143,20 @@ test("audio dry-run supports tts, sfx, and music routes", async () => {
   assert.equal(JSON.parse(sfx.stdout).request.body.duration_seconds, 3);
   assert.equal(JSON.parse(music.stdout).request.url, "https://router.flatkey.ai/v1/music");
   assert.equal(JSON.parse(music.stdout).request.body.music_length_ms, 10000);
+});
+
+test("per-command help prints usage without api key", async () => {
+  const video = await runCli(["video", "generate", "--help"]);
+  const status = await runCli(["status", "--help"]);
+  const helpTopic = await runCli(["help", "models"]);
+
+  assert.match(video.stdout, /Usage: flatkey video generate/);
+  assert.match(video.stdout, /--resolution/);
+  assert.match(status.stdout, /Usage: flatkey status/);
+  assert.match(helpTopic.stdout, /Usage: flatkey models/);
+  assert.equal(video.stderr, "");
+  assert.equal(status.stderr, "");
+  assert.equal(helpTopic.stderr, "");
 });
 
 test("generation commands write explicit output files", async (t) => {
@@ -220,19 +236,29 @@ test("prints json errors to stderr in json mode", async () => {
   assert.equal(result.stdout, "");
   assert.deepEqual(JSON.parse(result.stderr), {
     error: {
-      message: "Missing Flatkey API key. Run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.",
+      message: "Missing Flatkey API key. Create one at https://console.flatkey.ai/keys, then run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.",
     },
   });
+});
+
+test("onboard without api key points user to key creation", async () => {
+  const result = await runCliAllowFailure(["onboard", "--api-key"]);
+
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /Missing --api-key value/);
+  assert.match(result.stderr, /https:\/\/console\.flatkey\.ai\/keys/);
 });
 
 function listen(server) {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 }
 
-function runCli(args) {
+async function runCli(args) {
+  const home = await mkdtemp(join(tmpdir(), "flatkey-home-"));
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], {
-      env: { ...process.env, FLATKEY_API_KEY: "" },
+      env: { ...process.env, FLATKEY_API_KEY: "", HOME: home, USERPROFILE: home },
     });
     let stdout = "";
     let stderr = "";
@@ -253,10 +279,11 @@ function runCli(args) {
   });
 }
 
-function runCliAllowFailure(args) {
+async function runCliAllowFailure(args) {
+  const home = await mkdtemp(join(tmpdir(), "flatkey-home-"));
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], {
-      env: { ...process.env, FLATKEY_API_KEY: "" },
+      env: { ...process.env, FLATKEY_API_KEY: "", HOME: home, USERPROFILE: home },
     });
     let stdout = "";
     let stderr = "";

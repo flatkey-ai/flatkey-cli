@@ -1,11 +1,15 @@
 {
   "name": "@flatkey-ai/cli",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Flatkey media generation CLI for image, video, audio, credits, status, and models.",
   "type": "module",
   "bin": {
     "flatkey": "bin/flatkey.js"
   },
+  "files": [
+    "bin",
+    "src"
+  ],
   "scripts": {
     "test": "node --test"
   },

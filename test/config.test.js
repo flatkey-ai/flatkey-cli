@@ -45,7 +45,20 @@ test("throws actionable error when api key is missing", async () => {
 
   await assert.rejects(
     () => resolveApiKey({ env: {}, configDir }),
-    /Missing Flatkey API key.*flatkey onboard.*FLATKEY_API_KEY/s,
+    /Missing Flatkey API key.*https:\/\/console\.flatkey\.ai\/keys.*flatkey onboard.*FLATKEY_API_KEY/s,
+  );
+});
+
+test("rejects empty api key when writing config", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+
+  await assert.rejects(
+    () => writeConfig({ apiKey: "", configDir }),
+    /Missing --api-key value.*https:\/\/console\.flatkey\.ai\/keys/s,
+  );
+  await assert.rejects(
+    () => writeConfig({ apiKey: true, configDir }),
+    /Missing --api-key value.*https:\/\/console\.flatkey\.ai\/keys/s,
   );
 });
 

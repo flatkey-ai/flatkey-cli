@@ -22,13 +22,13 @@ export async function resolveApiKey({
   if (saved?.apiKey) return saved.apiKey;
 
   throw new Error(
-    "Missing Flatkey API key. Run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.",
+    "Missing Flatkey API key. Create one at https://console.flatkey.ai/keys, then run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.",
   );
 }
 
 export async function writeConfig({ apiKey, configDir = getDefaultConfigDir() }) {
-  if (!apiKey) {
-    throw new Error("Missing --api-key value.");
+  if (typeof apiKey !== "string" || apiKey.trim() === "") {
+    throw new Error("Missing --api-key value. Create a key at https://console.flatkey.ai/keys, then run `flatkey onboard --api-key <key>`.");
   }
 
   await mkdir(configDir, { recursive: true });

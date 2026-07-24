@@ -18,22 +18,54 @@ export function parseArgv(argv) {
   if (!group) {
     return { group: "help", action: undefined, options: {} };
   }
+  if (group === "--help" || group === "-h") {
+    return { group: "help", action: undefined, options: {} };
+  }
   if (group === "--version" || group === "-v") {
     return { group: "version", action: undefined, options: {} };
   }
   if (!COMMANDS.has(group)) {
     throw new Error(`Unknown command: ${group}`);
   }
+  if (group === "help" && maybeAction && !maybeAction.startsWith("--")) {
+    return {
+      group: "help",
+      action: undefined,
+      options: { command: maybeAction, ...parseOptions(rest) },
+    };
+  }
 
   const hasAction = GROUP_ACTIONS.has(group);
+  if (hasAction && isHelpToken(maybeAction)) {
+    return { group, action: undefined, options: { help: true } };
+  }
+  if (!hasAction && isHelpToken(maybeAction)) {
+    return { group, action: undefined, options: { help: true } };
+  }
   const action = hasAction ? maybeAction : undefined;
   const optionTokens = hasAction ? rest : argv.slice(1);
+  const hasHelpOption = optionTokens.some((token) => token === "--help" || token === "-h")
+    || (optionTokens.length === 1 && optionTokens[0] === "help");
+  if (hasHelpOption) {
+    return {
+      group,
+      action,
+      options: {
+        ...parseOptions(optionTokens.filter((token) => token !== "help" && token !== "--help" && token !== "-h")),
+        help: true,
+      },
+    };
+  }
 
   return {
     group,
     action,
     options: parseOptions(optionTokens),
   };
+}
+
+function isHelpToken(token) {
+  return token === "help" || token === "--help" || token === "-h";
 }
 
 function parseOptions(tokens) {
@@ -66,6 +98,11 @@ function parseOptions(tokens) {
 
 export async function main(argv) {
   const command = parseArgv(argv);
+  if (command.options.help) {
+    const result = await runCommand(command);
+    process.stdout.write(`${formatHuman(result)}\n`);
+    return;
+  }
   if (command.group === "onboard") {
     const { writeConfig } = await import("./config.js");
     const configPath = await writeConfig({ apiKey: command.options.api_key });
@@ -86,8 +123,13 @@ export async function runCommand(command, deps = {}) {
   const stderr = deps.stderr ?? process.stderr;
 
   if (command.group === "help") {
-    const { getAiHelp, getHumanHelp } = await import("./help.js");
+    const { getAiHelp, getCommandHelp, getHumanHelp } = await import("./help.js");
+    if (command.options.command) return getCommandHelp(command.options.command);
     return command.options.ai ? getAiHelp() : getHumanHelp();
+  }
+  if (command.options.help) {
+    const { getCommandHelp } = await import("./help.js");
+    return getCommandHelp(command.group, command.action);
   }
   if (command.group === "version") {
     const version = await readPackageVersion();

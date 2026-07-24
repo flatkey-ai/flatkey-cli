@@ -43,11 +43,24 @@ export function generateVideo(options) {
 }
 
 export function planVideoRequest(options) {
+  const ratio = validateOptionalValue(
+    optionValue(options, "ratio", "aspect"),
+    ["16:9", "9:16", "4:3", "3:4", "21:9", "1:1"],
+    "ratio",
+  );
+  const resolution = validateOptionalValue(
+    options.resolution,
+    ["480p", "720p", "1080p"],
+    "resolution",
+  );
   return planJsonPost(options, "/v1/video/generations", cleanObject({
     model: options.model ?? "veo-3",
     prompt: options.prompt,
     duration: parseOptionalInteger(options.duration),
-    aspect: options.aspect,
+    aspect: ratio,
+    ratio,
+    resolution,
+    quality: resolution,
     fps: parseOptionalInteger(options.fps),
   }));
 }
@@ -221,6 +234,12 @@ function optionValue(options, ...keys) {
     if (options[key] !== undefined) return options[key];
   }
   return undefined;
+}
+
+function validateOptionalValue(value, allowed, name) {
+  if (value === undefined) return undefined;
+  if (allowed.includes(value)) return value;
+  throw new Error(`Invalid ${name}: ${value}. Allowed values: ${allowed.join(", ")}`);
 }
 
 function cleanObject(value) {

@@ -90,7 +90,8 @@ test("builds video generation request", async () => {
     model: "veo-3",
     prompt: "walkthrough",
     duration: "8",
-    aspect: "16:9",
+    ratio: "16:9",
+    resolution: "720p",
     fps: "24",
     fetch,
   });
@@ -101,8 +102,44 @@ test("builds video generation request", async () => {
     prompt: "walkthrough",
     duration: 8,
     aspect: "16:9",
+    ratio: "16:9",
+    resolution: "720p",
+    quality: "720p",
     fps: 24,
   });
+});
+
+test("video request keeps aspect alias for ratio", () => {
+  assert.deepEqual(planVideoRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    prompt: "walkthrough",
+    aspect: "9:16",
+  }).body, {
+    model: "veo-3",
+    prompt: "walkthrough",
+    aspect: "9:16",
+    ratio: "9:16",
+  });
+});
+
+test("rejects unsupported video ratio and resolution values", () => {
+  assert.throws(
+    () => planVideoRequest({
+      apiKey: "key",
+      prompt: "walkthrough",
+      ratio: "2:1",
+    }),
+    /Invalid ratio: 2:1/,
+  );
+  assert.throws(
+    () => planVideoRequest({
+      apiKey: "key",
+      prompt: "walkthrough",
+      resolution: "4k",
+    }),
+    /Invalid resolution: 4k/,
+  );
 });
 
 test("builds seedance2 video generation request", async () => {

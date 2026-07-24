@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { getAiHelp, getHumanHelp } from "../src/help.js";
+import { getAiHelp, getCommandHelp, getHumanHelp } from "../src/help.js";
 
 test("ai help teaches agents setup and command usage", () => {
   const help = getAiHelp();
@@ -30,4 +30,29 @@ test("human help lists core commands", () => {
   assert.match(help, /models/);
   assert.match(help, /audio voices/);
   assert.match(help, /text generate/);
+});
+
+test("command help covers each command and action", () => {
+  for (const topic of [
+    "onboard",
+    "image",
+    "image generate",
+    "video",
+    "video generate",
+    "audio",
+    "audio generate",
+    "audio sfx",
+    "audio music",
+    "audio voices",
+    "text",
+    "text generate",
+    "credits",
+    "status",
+    "models",
+    "version",
+    "help",
+  ]) {
+    assert.match(getCommandHelp(...topic.split(" ")), /Usage: flatkey/);
+  }
+  assert.match(getCommandHelp("video", "generate"), /--resolution/);
 });

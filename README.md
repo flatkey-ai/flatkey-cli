@@ -79,7 +79,7 @@ Or save it locally:
 flatkey onboard --api-key <key>
 ```
 
-Get a key from [flatkey.ai](https://flatkey.ai/?utm_source=github&utm_medium=readme&utm_campaign=flatkey_cli_auth).
+Create a key at [console.flatkey.ai/keys](https://console.flatkey.ai/keys), then pass it with `--api-key`.
 
 ## Commands
 
@@ -98,8 +98,13 @@ flatkey image generate \
 flatkey video generate \
   --prompt "8 second cinematic product reveal, glossy black background" \
   --model seedance2 \
+  --ratio 16:9 \
+  --resolution 720p \
   -o launch.mp4
 ```
+
+Video ratios: `16:9`, `9:16`, `4:3`, `3:4`, `21:9`, `1:1`.
+Video resolutions: `480p`, `720p`, `1080p`.
 
 ### Generate Audio
 

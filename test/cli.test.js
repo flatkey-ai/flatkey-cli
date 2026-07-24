@@ -63,6 +63,25 @@ test("parses output aliases", () => {
   );
 });
 
+test("parses video ratio and resolution controls", () => {
+  const command = parseArgv([
+    "video",
+    "generate",
+    "--prompt",
+    "clip",
+    "--ratio",
+    "9:16",
+    "--resolution",
+    "1080p",
+  ]);
+
+  assert.deepEqual(command.options, {
+    prompt: "clip",
+    ratio: "9:16",
+    resolution: "1080p",
+  });
+});
+
 test("parses audio voice generation controls", () => {
   const command = parseArgv([
     "audio",
@@ -111,6 +130,40 @@ test("parses ai help", () => {
       ai: true,
     },
   });
+});
+
+test("parses per-command help forms", () => {
+  assert.deepEqual(parseArgv(["video", "--help"]), {
+    group: "video",
+    action: undefined,
+    options: { help: true },
+  });
+  assert.deepEqual(parseArgv(["video", "generate", "--help"]), {
+    group: "video",
+    action: "generate",
+    options: { help: true },
+  });
+  assert.deepEqual(parseArgv(["audio", "sfx", "help"]), {
+    group: "audio",
+    action: "sfx",
+    options: { help: true },
+  });
+  assert.deepEqual(parseArgv(["help", "image"]), {
+    group: "help",
+    action: undefined,
+    options: { command: "image" },
+  });
+});
+
+test("prompt value help is not parsed as command help", () => {
+  assert.deepEqual(parseArgv(["text", "generate", "--prompt", "help"]).options, {
+    prompt: "help",
+  });
+});
+
+test("per-command help returns without api key lookup", async () => {
+  assert.match(await runCommand({ group: "video", action: "generate", options: { help: true } }), /--ratio/);
+  assert.match(await runCommand({ group: "models", action: undefined, options: { help: true } }), /--type/);
 });
 
 test("parses global version aliases", () => {
