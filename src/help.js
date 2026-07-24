@@ -31,6 +31,8 @@ Commands:
 
 Environment:
 - FLATKEY_API_KEY: Flatkey API key.
+- ROUTER_ORIGIN: Override generation router origin, e.g. staging router.
+- CONSOLE_ORIGIN: Override console API origin, e.g. staging console.
 - Default router: https://router.flatkey.ai
 
 Recovery:
@@ -65,6 +67,10 @@ Global options:
   --json                         Print machine-readable JSON
   --output, -o <file>             Write generated output to a local file
   --base-url <url>               Override Flatkey router URL
+
+Environment:
+  ROUTER_ORIGIN                  Override generation router origin
+  CONSOLE_ORIGIN                 Override console API origin
   --console-url <url>            Override Flatkey console URL for login
 
 Video options:

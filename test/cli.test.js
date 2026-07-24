@@ -221,6 +221,55 @@ test("browser login prints approval URL and saves returned API key", async () =>
   assert.equal(typeof saved.auth.deviceId, "string");
 });
 
+test("origin env vars switch router and console APIs", async () => {
+  const video = await runCommand({
+    group: "video",
+    action: "generate",
+    options: {
+      prompt: "clip",
+      dry_run: true,
+      json: true,
+    },
+  }, {
+    env: {
+      ROUTER_ORIGIN: "https://staging-router.test",
+      CONSOLE_ORIGIN: "https://staging-console.test",
+    },
+  });
+  assert.equal(video.request.url, "https://staging-router.test/v1/video/generations");
+
+  const fetchCalls = [];
+  await runCommand({
+    group: "credits",
+    action: undefined,
+    options: { api_key: "key" },
+  }, {
+    env: { CONSOLE_ORIGIN: "https://staging-console.test" },
+    fetch: async (url) => {
+      fetchCalls.push(url);
+      return jsonResponse({});
+    },
+  });
+  assert.equal(fetchCalls[0], "https://staging-console.test/v1/credits");
+});
+
+test("command origins override origin env vars", async () => {
+  const image = await runCommand({
+    group: "image",
+    action: "generate",
+    options: {
+      prompt: "poster",
+      model: "gpt-image-2",
+      base_url: "https://router.flag",
+      dry_run: true,
+    },
+  }, {
+    env: { ROUTER_ORIGIN: "https://router.env" },
+  });
+
+  assert.equal(image.request.url, "https://router.flag/v1/images/generations");
+});
+
 test("auth status masks saved key and logout removes only key", async () => {
   const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
   await runCommand({

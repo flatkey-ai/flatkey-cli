@@ -219,7 +219,8 @@ async function handleLogin(command, deps) {
   const { createDeviceAuthorization, pollDeviceAuthorization } = await import("./api.js");
   const deviceId = await ensureDeviceId({ configDir: deps.configDir });
   const version = await readPackageVersion();
-  const consoleUrl = command.options.console_url;
+  const env = deps.env ?? process.env;
+  const consoleUrl = command.options.console_url ?? env.CONSOLE_ORIGIN;
   const authorization = await createDeviceAuthorization({
     consoleUrl,
     deviceId,
@@ -385,7 +386,7 @@ async function handleGenerate(command, deps) {
   const options = {
     ...command.options,
     apiKey,
-    baseUrl: command.options.base_url,
+    baseUrl: command.options.base_url ?? (deps.env ?? process.env).ROUTER_ORIGIN,
     fetch: deps.fetch,
   };
   if (command.options.dry_run) {
@@ -467,7 +468,7 @@ async function handleVoices(command, deps) {
   });
   return getVoices({
     apiKey,
-    baseUrl: command.options.base_url,
+    baseUrl: command.options.base_url ?? (deps.env ?? process.env).ROUTER_ORIGIN,
     fetch: deps.fetch,
   });
 }
@@ -519,7 +520,7 @@ async function handleUtility(command, deps) {
   });
   const options = {
     apiKey,
-    baseUrl: command.options.base_url,
+    baseUrl: command.options.base_url ?? (deps.env ?? process.env).CONSOLE_ORIGIN,
     fetch: deps.fetch,
   };
   return command.group === "credits" ? getCredits(options) : getStatus(options);
@@ -537,7 +538,7 @@ async function handleModels(command, deps) {
     });
     const response = await getModels({
       apiKey,
-      baseUrl: command.options.base_url,
+      baseUrl: command.options.base_url ?? (deps.env ?? process.env).CONSOLE_ORIGIN,
       fetch: deps.fetch,
     });
     const models = normalizeModels(response, command.options.type);
