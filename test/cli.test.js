@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { parseArgv, runCommand } from "../src/cli.js";
+import { writeConfig } from "../src/config.js";
 
 test("parses image generation with prompt and json mode", () => {
   const command = parseArgv(["image", "generate", "--prompt", "city at dawn", "--json"]);
@@ -219,6 +220,76 @@ test("browser login prints approval URL and saves returned API key", async () =>
   assert.equal(saved.auth.userId, 7);
   assert.equal(saved.auth.tokenId, 9);
   assert.equal(typeof saved.auth.deviceId, "string");
+});
+
+test("browser login stops when approved authorization has no API key", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  let pollCount = 0;
+
+  await assert.rejects(
+    () => runCommand({
+      group: "login",
+      action: undefined,
+      options: {
+        no_open: true,
+        console_url: "https://console.test",
+      },
+    }, {
+      configDir,
+      sleep: async () => {},
+      fetch: async (url) => {
+        if (url.endsWith("/token")) {
+          pollCount += 1;
+          return jsonResponse({ status: "approved" });
+        }
+        return jsonResponse({
+          device_code: "device-code",
+          verification_uri_complete: "https://console.test/cli/authorize?user_code=ABCD-EFGH",
+          expires_in: 600,
+          interval: 5,
+        });
+      },
+    }),
+    /authorization may have already been consumed.*flatkey login/,
+  );
+  assert.equal(pollCount, 1);
+});
+
+test("browser login reuses saved config when approved authorization is already consumed", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  await writeConfig({ apiKey: "sk-saved", configDir });
+
+  const result = await runCommand({
+    group: "login",
+    action: undefined,
+    options: {
+      json: true,
+      no_open: true,
+      console_url: "https://console.test",
+    },
+  }, {
+    configDir,
+    sleep: async () => {},
+    fetch: async (url) => url.endsWith("/token")
+      ? jsonResponse({ status: "approved", token_id: 9, user_id: 7 })
+      : jsonResponse({
+        device_code: "device-code",
+        verification_uri_complete: "https://console.test/cli/authorize?user_code=ABCD-EFGH",
+        expires_in: 600,
+        interval: 5,
+      }),
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.reusedConfig, true);
+  assert.equal(result.tokenId, 9);
+  assert.equal(result.userId, 7);
+
+  const saved = JSON.parse(await readFile(join(configDir, "config.json"), "utf8"));
+  assert.equal(saved.apiKey, "sk-saved");
+  assert.equal(saved.auth.type, "device");
+  assert.equal(saved.auth.tokenId, 9);
+  assert.equal(saved.auth.userId, 7);
 });
 
 test("origin env vars switch router and console APIs", async () => {

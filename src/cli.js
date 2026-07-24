@@ -215,7 +215,7 @@ export async function runCommand(command, deps = {}) {
 }
 
 async function handleLogin(command, deps) {
-  const { ensureDeviceId, resolveOrigins, writeAuthConfig } = await import("./config.js");
+  const { ensureDeviceId, readConfig, resolveOrigins, writeAuthConfig } = await import("./config.js");
   const { createDeviceAuthorization, pollDeviceAuthorization } = await import("./api.js");
   const deviceId = await ensureDeviceId({ configDir: deps.configDir });
   const version = await readPackageVersion();
@@ -256,7 +256,29 @@ async function handleLogin(command, deps) {
     const pollData = poll?.data ?? poll;
     if (pollData?.status === "approved") {
       if (!pollData.api_key) {
-        throw new Error("Flatkey login approved but no API key was returned.");
+        const saved = await readConfig(deps.configDir);
+        if (typeof saved?.apiKey === "string" && saved.apiKey.trim() !== "") {
+          const configPath = await writeAuthConfig({
+            apiKey: saved.apiKey,
+            auth: {
+              deviceId,
+              userId: pollData.user_id ?? saved.auth?.userId,
+              tokenId: pollData.token_id ?? saved.auth?.tokenId,
+              loginAt: Math.floor(Date.now() / 1000),
+            },
+            configDir: deps.configDir,
+          });
+          return command.options.json
+            ? {
+              success: true,
+              configPath,
+              tokenId: pollData.token_id ?? saved.auth?.tokenId,
+              userId: pollData.user_id ?? saved.auth?.userId,
+              reusedConfig: true,
+            }
+            : `Flatkey CLI already authorized. Saved config: ${configPath}`;
+        }
+        throw new Error("Flatkey login was approved, but no API key was returned. The authorization may have already been consumed. Run `flatkey login` again.");
       }
       const configPath = await writeAuthConfig({
         apiKey: pollData.api_key,
