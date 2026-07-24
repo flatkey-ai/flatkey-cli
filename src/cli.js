@@ -15,6 +15,28 @@ const COMMANDS = new Set([
 ]);
 
 const GROUP_ACTIONS = new Set(["audio", "auth", "image", "text", "video"]);
+const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "dry_run", "help", "json", "output", "out"]);
+const COMMAND_OPTIONS = {
+  "audio generate": new Set(["model", "prompt", "similarity_boost", "stability", "style", "voice_id"]),
+  "audio music": new Set(["music_length_ms", "prompt"]),
+  "audio sfx": new Set(["duration", "prompt"]),
+  "audio voices": new Set([]),
+  "auth status": new Set([]),
+  credits: new Set([]),
+  help: new Set(["ai", "command"]),
+  image: new Set([]),
+  "image generate": new Set(["model", "n", "prompt", "quality", "size"]),
+  login: new Set(["console_url", "no_open", "open"]),
+  logout: new Set([]),
+  models: new Set(["type"]),
+  onboard: new Set(["api_key"]),
+  status: new Set([]),
+  text: new Set([]),
+  "text generate": new Set(["model", "prompt"]),
+  version: new Set([]),
+  video: new Set([]),
+  "video generate": new Set(["aspect", "duration", "fps", "model", "prompt", "ratio", "resolution"]),
+};
 
 export function parseArgv(argv) {
   const [group, maybeAction, ...rest] = argv;
@@ -31,11 +53,11 @@ export function parseArgv(argv) {
     throw new Error(`Unknown command: ${group}`);
   }
   if (group === "help" && maybeAction && !maybeAction.startsWith("--")) {
-    return {
+    return validateCommandOptions({
       group: "help",
       action: undefined,
       options: { command: maybeAction, ...parseOptions(rest) },
-    };
+    });
   }
 
   const hasAction = GROUP_ACTIONS.has(group);
@@ -50,21 +72,21 @@ export function parseArgv(argv) {
   const hasHelpOption = optionTokens.some((token) => token === "--help" || token === "-h")
     || (optionTokens.length === 1 && optionTokens[0] === "help");
   if (hasHelpOption) {
-    return {
+    return validateCommandOptions({
       group,
       action,
       options: {
         ...parseOptions(optionTokens.filter((token) => token !== "help" && token !== "--help" && token !== "-h")),
         help: true,
       },
-    };
+    });
   }
 
-  return {
+  return validateCommandOptions({
     group,
     action,
     options: parseOptions(optionTokens),
-  };
+  });
 }
 
 function isHelpToken(token) {
@@ -97,6 +119,20 @@ function parseOptions(tokens) {
     index += 1;
   }
   return options;
+}
+
+function validateCommandOptions(command) {
+  const key = command.action ? `${command.group} ${command.action}` : command.group;
+  const allowed = COMMAND_OPTIONS[key] ?? new Set();
+  for (const option of Object.keys(command.options)) {
+    if (GLOBAL_OPTIONS.has(option) || allowed.has(option)) continue;
+    const flag = `--${option.replaceAll("_", "-")}`;
+    const helpCommand = command.action
+      ? `flatkey ${command.group} ${command.action} --help`
+      : `flatkey ${command.group} --help`;
+    throw new Error(`Unknown option ${flag} for flatkey ${key}. Run \`${helpCommand}\` to see supported options.`);
+  }
+  return command;
 }
 
 export async function main(argv) {

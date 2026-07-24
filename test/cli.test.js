@@ -66,6 +66,17 @@ test("parses output aliases", () => {
   );
 });
 
+test("rejects unknown options with command help hint", () => {
+  assert.throws(
+    () => parseArgv(["image", "generate", "--prompt", "x", "--ouput", "out.png"]),
+    /Unknown option --ouput.*flatkey image generate --help/,
+  );
+  assert.throws(
+    () => parseArgv(["credits", "--prompt", "x"]),
+    /Unknown option --prompt.*flatkey credits --help/,
+  );
+});
+
 test("parses video ratio and resolution controls", () => {
   const command = parseArgv([
     "video",
