@@ -285,7 +285,7 @@ async function runCli(args) {
   const home = await mkdtemp(join(tmpdir(), "flatkey-home-"));
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], {
-      env: { ...process.env, FLATKEY_API_KEY: "", HOME: home, USERPROFILE: home },
+      env: cleanCliEnv(home),
     });
     let stdout = "";
     let stderr = "";
@@ -310,7 +310,7 @@ async function runCliAllowFailure(args) {
   const home = await mkdtemp(join(tmpdir(), "flatkey-home-"));
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], {
-      env: { ...process.env, FLATKEY_API_KEY: "", HOME: home, USERPROFILE: home },
+      env: cleanCliEnv(home),
     });
     let stdout = "";
     let stderr = "";
@@ -325,4 +325,15 @@ async function runCliAllowFailure(args) {
       resolve({ code, stdout, stderr });
     });
   });
+}
+
+function cleanCliEnv(home) {
+  return {
+    ...process.env,
+    CONSOLE_ORIGIN: "",
+    FLATKEY_API_KEY: "",
+    HOME: home,
+    ROUTER_ORIGIN: "",
+    USERPROFILE: home,
+  };
 }

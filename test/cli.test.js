@@ -342,6 +342,17 @@ test("auth status masks saved key and logout removes only key", async () => {
   assert.equal(status.source, "config");
   assert.equal(status.key, "sk-log...cret");
 
+  const statusWithEnv = await runCommand({
+    group: "auth",
+    action: "status",
+    options: { json: true },
+  }, {
+    configDir,
+    env: { FLATKEY_API_KEY: "sk-env-secret" },
+  });
+  assert.equal(statusWithEnv.source, "config");
+  assert.equal(statusWithEnv.key, "sk-log...cret");
+
   await runCommand({ group: "logout", action: undefined, options: {} }, { configDir });
   const afterLogout = await runCommand({
     group: "auth",

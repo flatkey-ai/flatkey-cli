@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+export const ROUTER_ORIGIN_KEY = "routerOrigin";
+export const CONSOLE_ORIGIN_KEY = "consoleOrigin";
+
 export function getDefaultConfigDir() {
   return join(homedir(), ".config", "flatkey");
 }
@@ -17,14 +20,38 @@ export async function resolveApiKey({
   configDir = getDefaultConfigDir(),
 } = {}) {
   if (apiKey) return apiKey;
-  if (env.FLATKEY_API_KEY) return env.FLATKEY_API_KEY;
 
   const saved = await readSavedConfig(configDir);
   if (saved?.apiKey) return saved.apiKey;
+  if (env.FLATKEY_API_KEY) return env.FLATKEY_API_KEY;
 
   throw new Error(
     "Missing Flatkey API key. Create one at https://console.flatkey.ai/keys, then run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.",
   );
+}
+
+export async function resolveOrigins({
+  baseUrl,
+  consoleUrl,
+  env = process.env,
+  configDir = getDefaultConfigDir(),
+} = {}) {
+  const saved = await readSavedConfig(configDir);
+  return {
+    routerOrigin: firstNonEmpty(
+      baseUrl,
+      saved?.[ROUTER_ORIGIN_KEY],
+      saved?.ROUTER_ORIGIN,
+      env.ROUTER_ORIGIN,
+    ),
+    consoleOrigin: firstNonEmpty(
+      consoleUrl,
+      baseUrl,
+      saved?.[CONSOLE_ORIGIN_KEY],
+      saved?.CONSOLE_ORIGIN,
+      env.CONSOLE_ORIGIN,
+    ),
+  };
 }
 
 export async function writeConfig({ apiKey, configDir = getDefaultConfigDir() }) {
@@ -34,7 +61,8 @@ export async function writeConfig({ apiKey, configDir = getDefaultConfigDir() })
 
   await mkdir(configDir, { recursive: true });
   const configPath = getConfigPath(configDir);
-  await writeFile(configPath, `${JSON.stringify({ apiKey }, null, 2)}\n`, {
+  const saved = await readSavedConfig(configDir) ?? {};
+  await writeFile(configPath, `${JSON.stringify({ ...saved, apiKey }, null, 2)}\n`, {
     mode: 0o600,
   });
   try {
@@ -108,4 +136,8 @@ async function readSavedConfig(configDir) {
     if (error.code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+function firstNonEmpty(...values) {
+  return values.find((value) => typeof value === "string" && value.trim() !== "");
 }

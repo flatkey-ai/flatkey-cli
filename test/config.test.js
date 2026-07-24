@@ -10,6 +10,7 @@ import {
   getConfigPath,
   readConfig,
   resolveApiKey,
+  resolveOrigins,
   writeAuthConfig,
   writeConfig,
 } from "../src/config.js";
@@ -27,9 +28,20 @@ test("resolves api key from explicit option first", async () => {
   assert.equal(key, "option-key");
 });
 
-test("resolves api key from FLATKEY_API_KEY before saved config", async () => {
+test("resolves api key from saved config before FLATKEY_API_KEY", async () => {
   const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
   await writeConfig({ apiKey: "saved-key", configDir });
+
+  const key = await resolveApiKey({
+    env: { FLATKEY_API_KEY: "env-key" },
+    configDir,
+  });
+
+  assert.equal(key, "saved-key");
+});
+
+test("resolves api key from FLATKEY_API_KEY when config is missing", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
 
   const key = await resolveApiKey({
     env: { FLATKEY_API_KEY: "env-key" },
@@ -46,6 +58,60 @@ test("resolves api key from saved config", async () => {
   const key = await resolveApiKey({ env: {}, configDir });
 
   assert.equal(key, "saved-key");
+});
+
+test("resolves origins from config before env and merges missing values", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  await writeAuthConfig({
+    apiKey: "saved-key",
+    auth: { deviceId: "device-1" },
+    configDir,
+  });
+  const configPath = await writeConfig({ apiKey: "saved-key-2", configDir });
+  const saved = JSON.parse(await readFile(configPath, "utf8"));
+  saved.consoleOrigin = "https://console.config";
+  await import("node:fs/promises").then(({ writeFile }) => writeFile(configPath, `${JSON.stringify(saved, null, 2)}\n`));
+
+  const origins = await resolveOrigins({
+    env: {
+      CONSOLE_ORIGIN: "https://console.env",
+      ROUTER_ORIGIN: "https://router.env",
+    },
+    configDir,
+  });
+
+  assert.deepEqual(origins, {
+    consoleOrigin: "https://console.config",
+    routerOrigin: "https://router.env",
+  });
+  assert.equal((await readConfig(configDir)).auth.deviceId, "device-1");
+});
+
+test("explicit origins override config and env", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  const configPath = getConfigPath(configDir);
+  await import("node:fs/promises").then(async ({ mkdir, writeFile }) => {
+    await mkdir(configDir, { recursive: true });
+    await writeFile(configPath, `${JSON.stringify({
+      consoleOrigin: "https://console.config",
+      routerOrigin: "https://router.config",
+    }, null, 2)}\n`);
+  });
+
+  const origins = await resolveOrigins({
+    baseUrl: "https://base.flag",
+    consoleUrl: "https://console.flag",
+    env: {
+      CONSOLE_ORIGIN: "https://console.env",
+      ROUTER_ORIGIN: "https://router.env",
+    },
+    configDir,
+  });
+
+  assert.deepEqual(origins, {
+    consoleOrigin: "https://console.flag",
+    routerOrigin: "https://base.flag",
+  });
 });
 
 test("throws actionable error when api key is missing", async () => {

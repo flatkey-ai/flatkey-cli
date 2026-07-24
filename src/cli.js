@@ -215,14 +215,17 @@ export async function runCommand(command, deps = {}) {
 }
 
 async function handleLogin(command, deps) {
-  const { ensureDeviceId, writeAuthConfig } = await import("./config.js");
+  const { ensureDeviceId, resolveOrigins, writeAuthConfig } = await import("./config.js");
   const { createDeviceAuthorization, pollDeviceAuthorization } = await import("./api.js");
   const deviceId = await ensureDeviceId({ configDir: deps.configDir });
   const version = await readPackageVersion();
-  const env = deps.env ?? process.env;
-  const consoleUrl = firstNonEmpty(command.options.console_url, env.CONSOLE_ORIGIN);
+  const { consoleOrigin } = await resolveOrigins({
+    consoleUrl: command.options.console_url,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
   const authorization = await createDeviceAuthorization({
-    consoleUrl,
+    consoleUrl: consoleOrigin,
     deviceId,
     clientName: "flatkey-cli",
     clientVersion: version,
@@ -246,7 +249,7 @@ async function handleLogin(command, deps) {
   while (Date.now() < deadline) {
     await delay(nextLoginPollDelay(startedAt, initialIntervalMs), deps);
     const poll = await pollDeviceAuthorization({
-      consoleUrl,
+      consoleUrl: consoleOrigin,
       deviceCode: data.device_code,
       fetch: deps.fetch,
     });
@@ -352,10 +355,10 @@ async function handleAuthStatus(command, deps) {
     authenticated: Boolean(apiKey),
     source: command.options.api_key
       ? "option"
-      : (deps.env ?? process.env).FLATKEY_API_KEY
-        ? "env"
-        : saved?.apiKey
-          ? "config"
+      : saved?.apiKey
+        ? "config"
+        : (deps.env ?? process.env).FLATKEY_API_KEY
+          ? "env"
           : "none",
     key: maskKey(apiKey),
     auth: saved?.auth ?? null,
@@ -364,7 +367,7 @@ async function handleAuthStatus(command, deps) {
 }
 
 async function handleGenerate(command, deps) {
-  const { resolveApiKey } = await import("./config.js");
+  const { resolveApiKey, resolveOrigins } = await import("./config.js");
   const {
     generateAudio,
     generateAudioMusic,
@@ -386,11 +389,17 @@ async function handleGenerate(command, deps) {
     : await resolveApiKey({
         apiKey: command.options.api_key,
         env: deps.env ?? process.env,
+        configDir: deps.configDir,
       });
+  const { routerOrigin } = await resolveOrigins({
+    baseUrl: command.options.base_url,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
   const options = {
     ...command.options,
     apiKey,
-    baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).ROUTER_ORIGIN),
+    baseUrl: routerOrigin,
     fetch: deps.fetch,
   };
   if (command.options.dry_run) {
@@ -464,15 +473,21 @@ function scrubArtifactResponse(value) {
 }
 
 async function handleVoices(command, deps) {
-  const { resolveApiKey } = await import("./config.js");
+  const { resolveApiKey, resolveOrigins } = await import("./config.js");
   const { getVoices } = await import("./api.js");
   const apiKey = await resolveApiKey({
     apiKey: command.options.api_key,
     env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
+  const { routerOrigin } = await resolveOrigins({
+    baseUrl: command.options.base_url,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
   });
   return getVoices({
     apiKey,
-    baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).ROUTER_ORIGIN),
+    baseUrl: routerOrigin,
     fetch: deps.fetch,
   });
 }
@@ -516,32 +531,44 @@ function redactRequest(request) {
 }
 
 async function handleUtility(command, deps) {
-  const { resolveApiKey } = await import("./config.js");
+  const { resolveApiKey, resolveOrigins } = await import("./config.js");
   const { getCredits, getStatus } = await import("./api.js");
   const apiKey = await resolveApiKey({
     apiKey: command.options.api_key,
     env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
+  const { consoleOrigin } = await resolveOrigins({
+    baseUrl: command.options.base_url,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
   });
   const options = {
     apiKey,
-    baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).CONSOLE_ORIGIN),
+    baseUrl: consoleOrigin,
     fetch: deps.fetch,
   };
   return command.group === "credits" ? getCredits(options) : getStatus(options);
 }
 
 async function handleModels(command, deps) {
-  const { resolveApiKey } = await import("./config.js");
+  const { resolveApiKey, resolveOrigins } = await import("./config.js");
   const { getModels } = await import("./api.js");
   const { normalizeModels } = await import("./models.js");
 
   const apiKey = await resolveApiKey({
     apiKey: command.options.api_key,
     env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
+  const { consoleOrigin } = await resolveOrigins({
+    baseUrl: command.options.base_url,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
   });
   const response = await getModels({
     apiKey,
-    baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).CONSOLE_ORIGIN),
+    baseUrl: consoleOrigin,
     fetch: deps.fetch,
   });
   return { models: normalizeModels(response, command.options.type) };
