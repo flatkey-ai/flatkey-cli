@@ -253,6 +253,43 @@ test("origin env vars switch router and console APIs", async () => {
   assert.equal(fetchCalls[0], "https://staging-console.test/v1/credits");
 });
 
+test("empty origin env vars fall back to default origins", async () => {
+  const image = await runCommand({
+    group: "image",
+    action: "generate",
+    options: {
+      prompt: "poster",
+      model: "gpt-image-2",
+      dry_run: true,
+    },
+  }, {
+    env: { ROUTER_ORIGIN: "", CONSOLE_ORIGIN: "" },
+  });
+  assert.equal(image.request.url, "https://router.flatkey.ai/v1/images/generations");
+
+  const fetchCalls = [];
+  await runCommand({
+    group: "login",
+    action: undefined,
+    options: { json: true, no_open: true },
+  }, {
+    env: { CONSOLE_ORIGIN: "" },
+    sleep: async () => {},
+    fetch: async (url) => {
+      fetchCalls.push(url);
+      return url.endsWith("/token")
+        ? jsonResponse({ status: "approved", api_key: "sk-login", token_id: 9, user_id: 7 })
+        : jsonResponse({
+          device_code: "device-code",
+          verification_uri_complete: "https://console.flatkey.ai/cli/authorize",
+          expires_in: 600,
+          interval: 5,
+        });
+    },
+  });
+  assert.equal(fetchCalls[0], "https://console.flatkey.ai/api/cli/device_authorizations");
+});
+
 test("command origins override origin env vars", async () => {
   const image = await runCommand({
     group: "image",

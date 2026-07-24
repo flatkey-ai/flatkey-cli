@@ -220,7 +220,7 @@ async function handleLogin(command, deps) {
   const deviceId = await ensureDeviceId({ configDir: deps.configDir });
   const version = await readPackageVersion();
   const env = deps.env ?? process.env;
-  const consoleUrl = command.options.console_url ?? env.CONSOLE_ORIGIN;
+  const consoleUrl = firstNonEmpty(command.options.console_url, env.CONSOLE_ORIGIN);
   const authorization = await createDeviceAuthorization({
     consoleUrl,
     deviceId,
@@ -323,6 +323,10 @@ function formatAuthStatus(status) {
   return `Authenticated via ${status.source}: ${status.key}`;
 }
 
+function firstNonEmpty(...values) {
+  return values.find((value) => typeof value === "string" && value.trim() !== "");
+}
+
 async function handleLogout(command, deps = {}) {
   const { clearSavedApiKey } = await import("./config.js");
   const configPath = await clearSavedApiKey({ configDir: deps.configDir });
@@ -386,7 +390,7 @@ async function handleGenerate(command, deps) {
   const options = {
     ...command.options,
     apiKey,
-    baseUrl: command.options.base_url ?? (deps.env ?? process.env).ROUTER_ORIGIN,
+    baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).ROUTER_ORIGIN),
     fetch: deps.fetch,
   };
   if (command.options.dry_run) {
@@ -468,7 +472,7 @@ async function handleVoices(command, deps) {
   });
   return getVoices({
     apiKey,
-    baseUrl: command.options.base_url ?? (deps.env ?? process.env).ROUTER_ORIGIN,
+    baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).ROUTER_ORIGIN),
     fetch: deps.fetch,
   });
 }
@@ -520,7 +524,7 @@ async function handleUtility(command, deps) {
   });
   const options = {
     apiKey,
-    baseUrl: command.options.base_url ?? (deps.env ?? process.env).CONSOLE_ORIGIN,
+    baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).CONSOLE_ORIGIN),
     fetch: deps.fetch,
   };
   return command.group === "credits" ? getCredits(options) : getStatus(options);
@@ -538,7 +542,7 @@ async function handleModels(command, deps) {
     });
     const response = await getModels({
       apiKey,
-      baseUrl: command.options.base_url ?? (deps.env ?? process.env).CONSOLE_ORIGIN,
+      baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).CONSOLE_ORIGIN),
       fetch: deps.fetch,
     });
     const models = normalizeModels(response, command.options.type);
