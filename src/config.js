@@ -26,7 +26,7 @@ export async function resolveApiKey({
   if (env.FLATKEY_API_KEY) return env.FLATKEY_API_KEY;
 
   throw new Error(
-    "Missing Flatkey API key. Create one at https://console.flatkey.ai/keys, then run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.",
+    "Missing or invalid Flatkey API key. Run `flatkey login`, or create a key at https://console.flatkey.ai/keys and run `flatkey onboard --api-key <key>`.",
   );
 }
 

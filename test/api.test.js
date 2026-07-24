@@ -360,19 +360,30 @@ test("throws FlatkeyError with API message on HTTP failure", async () => {
   );
 });
 
-test("normalizes token missing API message to onboarding guidance", async () => {
-  const fetch = async () => ({
+test("normalizes auth token API messages to login guidance", async () => {
+  const fetch = async (url) => ({
     ok: false,
     status: 401,
     async json() {
-      return { message: "Token not provided" };
+      return url.endsWith("/status")
+        ? { message: "Token not provided" }
+        : { error: { message: "Invalid token (request id: req_123)" } };
     },
   });
 
   await assert.rejects(
     () => getStatus({ apiKey: "key", baseUrl: "https://router.test", fetch }),
     (error) => error instanceof FlatkeyError
-      && /Missing Flatkey API key/.test(error.message)
-      && /https:\/\/console\.flatkey\.ai\/keys/.test(error.message),
+      && /Missing or invalid Flatkey API key/.test(error.message)
+      && /flatkey login/.test(error.message)
+      && /flatkey onboard --api-key/.test(error.message),
+  );
+  await assert.rejects(
+    () => getCredits({ apiKey: "key", baseUrl: "https://router.test", fetch }),
+    (error) => error instanceof FlatkeyError
+      && /Missing or invalid Flatkey API key/.test(error.message)
+      && /flatkey login/.test(error.message)
+      && /flatkey onboard --api-key/.test(error.message)
+      && !/Invalid token/.test(error.message),
   );
 });

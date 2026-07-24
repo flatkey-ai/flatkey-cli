@@ -119,7 +119,7 @@ test("throws actionable error when api key is missing", async () => {
 
   await assert.rejects(
     () => resolveApiKey({ env: {}, configDir }),
-    /Missing Flatkey API key.*https:\/\/console\.flatkey\.ai\/keys.*flatkey onboard.*FLATKEY_API_KEY/s,
+    /Missing or invalid Flatkey API key.*flatkey login.*https:\/\/console\.flatkey\.ai\/keys.*flatkey onboard --api-key/s,
   );
 });
 

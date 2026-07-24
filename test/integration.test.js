@@ -141,8 +141,8 @@ test("credits and status normalize missing token API errors", async (t) => {
 
   assert.equal(credits.code, 1);
   assert.equal(status.code, 1);
-  assert.match(credits.stderr, /Missing Flatkey API key/);
-  assert.match(status.stderr, /Missing Flatkey API key/);
+  assert.match(credits.stderr, /Missing or invalid Flatkey API key/);
+  assert.match(status.stderr, /Missing or invalid Flatkey API key/);
   assert.doesNotMatch(credits.stderr, /Token not provided/);
   assert.doesNotMatch(status.stderr, /Token not provided/);
 });
@@ -301,7 +301,7 @@ test("prints json errors to stderr in json mode", async () => {
   assert.equal(result.stdout, "");
   assert.deepEqual(JSON.parse(result.stderr), {
     error: {
-      message: "Missing Flatkey API key. Create one at https://console.flatkey.ai/keys, then run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.",
+      message: "Missing or invalid Flatkey API key. Run `flatkey login`, or create a key at https://console.flatkey.ai/keys and run `flatkey onboard --api-key <key>`.",
     },
   });
 });

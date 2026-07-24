@@ -295,11 +295,15 @@ function extractErrorMessage(body, status) {
     : typeof body?.message === "string"
       ? body.message
       : undefined;
-  if (message === "Token not provided") return missingApiKeyMessage();
+  if (isAuthTokenError(message)) return missingApiKeyMessage();
   if (message) return message;
   return `Flatkey API request failed with HTTP ${status}`;
 }
 
+function isAuthTokenError(message) {
+  return message === "Token not provided" || /^Invalid token\b/i.test(message ?? "");
+}
+
 function missingApiKeyMessage() {
-  return "Missing Flatkey API key. Create one at https://console.flatkey.ai/keys, then run `flatkey onboard --api-key <key>` or set FLATKEY_API_KEY.";
+  return "Missing or invalid Flatkey API key. Run `flatkey login`, or create a key at https://console.flatkey.ai/keys and run `flatkey onboard --api-key <key>`.";
 }
