@@ -533,23 +533,18 @@ async function handleUtility(command, deps) {
 async function handleModels(command, deps) {
   const { resolveApiKey } = await import("./config.js");
   const { getModels } = await import("./api.js");
-  const { getBundledModels, normalizeModels } = await import("./models.js");
+  const { normalizeModels } = await import("./models.js");
 
-  try {
-    const apiKey = await resolveApiKey({
-      apiKey: command.options.api_key,
-      env: deps.env ?? process.env,
-    });
-    const response = await getModels({
-      apiKey,
-      baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).CONSOLE_ORIGIN),
-      fetch: deps.fetch,
-    });
-    const models = normalizeModels(response, command.options.type);
-    return { models: models.length ? models : getBundledModels(command.options.type) };
-  } catch {
-    return { models: getBundledModels(command.options.type) };
-  }
+  const apiKey = await resolveApiKey({
+    apiKey: command.options.api_key,
+    env: deps.env ?? process.env,
+  });
+  const response = await getModels({
+    apiKey,
+    baseUrl: firstNonEmpty(command.options.base_url, (deps.env ?? process.env).CONSOLE_ORIGIN),
+    fetch: deps.fetch,
+  });
+  return { models: normalizeModels(response, command.options.type) };
 }
 
 function formatHuman(result) {

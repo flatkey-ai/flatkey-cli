@@ -1,24 +1,3 @@
-const BUNDLED_MODELS = [
-  { id: "nano-banana-pro-preview", type: "image" },
-  { id: "nano-banana-flash", type: "image" },
-  { id: "gpt-image-2", type: "image" },
-  { id: "veo-3", type: "video" },
-  { id: "veo-3-fast", type: "video" },
-  { id: "seedance2", type: "video" },
-  { id: "gpt-5.5", type: "text" },
-  { id: "eleven_multilingual_v2", type: "audio" },
-  { id: "eleven_turbo_v2_5", type: "audio" },
-  { id: "eleven_flash_v2_5", type: "audio" },
-  { id: "sound-generation", type: "audio" },
-  { id: "music", type: "audio" },
-];
-
-export function getBundledModels(type) {
-  return BUNDLED_MODELS
-    .filter((model) => !type || model.type === type)
-    .map((model) => ({ ...model, source: "bundled" }));
-}
-
 export function normalizeModels(response, type) {
   const rawModels = Array.isArray(response?.data)
     ? response.data

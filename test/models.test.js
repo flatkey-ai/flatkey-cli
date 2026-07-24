@@ -1,25 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { getBundledModels, normalizeModels } from "../src/models.js";
+import { normalizeModels } from "../src/models.js";
 
-test("returns bundled fallback models with source marker", () => {
-  const models = getBundledModels();
-
-  assert.ok(models.some((model) => model.id === "nano-banana-pro-preview"));
-  assert.ok(models.some((model) => model.id === "seedance2"));
-  assert.ok(models.some((model) => model.id === "gpt-5.5"));
-  assert.ok(models.some((model) => model.type === "video"));
-  assert.ok(models.some((model) => model.type === "text"));
-  assert.ok(models.some((model) => model.type === "audio"));
-  assert.equal(models[0].source, "bundled");
-});
-
-test("filters bundled models by type", () => {
-  const models = getBundledModels("image");
-
-  assert.ok(models.length > 0);
-  assert.ok(models.every((model) => model.type === "image"));
+test("returns empty list for empty model registry responses", () => {
+  assert.deepEqual(normalizeModels({ data: [] }), []);
+  assert.deepEqual(normalizeModels({ models: [] }, "video"), []);
+  assert.deepEqual(normalizeModels({}, "image"), []);
 });
 
 test("normalizes remote model arrays", () => {
