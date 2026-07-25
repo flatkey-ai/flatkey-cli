@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -67,6 +67,17 @@ test("parses output aliases", () => {
   );
 });
 
+test("parses image upload command", () => {
+  assert.deepEqual(parseArgv(["image", "upload", "--file", "./cat.png", "--json"]), {
+    group: "image",
+    action: "upload",
+    options: {
+      file: "./cat.png",
+      json: true,
+    },
+  });
+});
+
 test("rejects unknown options with command help hint", () => {
   assert.throws(
     () => parseArgv(["image", "generate", "--prompt", "x", "--ouput", "out.png"]),
@@ -121,6 +132,30 @@ test("parses repeatable video reference controls", () => {
     video_url: ["https://example.com/ref.mp4"],
     first_frame_url: "https://example.com/first.png",
     last_frame_url: "https://example.com/last.png",
+  });
+});
+
+test("parses video local image controls", () => {
+  const command = parseArgv([
+    "video",
+    "generate",
+    "--prompt",
+    "clip",
+    "--image",
+    "./a.png",
+    "--image",
+    "./b.png",
+    "--first-frame",
+    "./first.png",
+    "--last-frame",
+    "./last.png",
+  ]);
+
+  assert.deepEqual(command.options, {
+    prompt: "clip",
+    image: ["./a.png", "./b.png"],
+    first_frame: "./first.png",
+    last_frame: "./last.png",
   });
 });
 
@@ -427,6 +462,76 @@ test("command origins override origin env vars", async () => {
   });
 
   assert.equal(image.request.url, "https://router.flag/v1/images/generations");
+});
+
+test("image upload posts local file to temp media endpoint", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-upload-"));
+  const file = join(dir, "cat.png");
+  await writeFile(file, "image-bytes");
+  const calls = [];
+
+  const result = await runCommand({
+    group: "image",
+    action: "upload",
+    options: {
+      file,
+      api_key: "key",
+      base_url: "https://router.test",
+      json: true,
+    },
+  }, {
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return jsonResponse({
+        success: true,
+        data: {
+          signed_url: "https://storage.test/cat.png",
+          object_key: "temp-media/1/cat.png",
+          expires_in: 43200,
+        },
+      });
+    },
+  });
+
+  assert.equal(calls[0].url, "https://router.test/v1/temp-media/images");
+  assert.equal(calls[0].init.body instanceof FormData, true);
+  assert.equal(result.url, "https://storage.test/cat.png");
+  assert.equal(result.objectKey, "temp-media/1/cat.png");
+});
+
+test("video generation uploads local image references before request", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-video-upload-"));
+  const image = join(dir, "ref.png");
+  await writeFile(image, "image-bytes");
+  const calls = [];
+
+  const result = await runCommand({
+    group: "video",
+    action: "generate",
+    options: {
+      prompt: "clip",
+      image: [image],
+      api_key: "key",
+      base_url: "https://router.test",
+      json: true,
+    },
+  }, {
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/v1/temp-media/images")) {
+        return jsonResponse({ success: true, data: { signed_url: "https://storage.test/ref.png" } });
+      }
+      return jsonResponse({ data: [{ url: "https://cdn.test/video.mp4" }] });
+    },
+  });
+
+  const videoCall = calls.find((call) => call.url.endsWith("/v1/video/generations"));
+  assert.ok(videoCall);
+  assert.deepEqual(JSON.parse(videoCall.init.body).content, [
+    { type: "text", text: "clip" },
+    { type: "image_url", image_url: { url: "https://storage.test/ref.png" }, role: "reference_image" },
+  ]);
+  assert.deepEqual(result.artifacts, [{ url: "https://cdn.test/video.mp4" }]);
 });
 
 test("auth status masks saved key and logout removes only key", async () => {

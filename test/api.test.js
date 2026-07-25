@@ -18,6 +18,7 @@ import {
   planVoicesRequest,
   planVideoRequest,
   pollDeviceAuthorization,
+  uploadTempMediaImage,
 } from "../src/api.js";
 
 function fetchRecorder(responseBody = { ok: true }) {
@@ -81,6 +82,27 @@ test("builds OpenAI image request for gpt image models", async () => {
     size: "1024x1024",
     n: 2,
   });
+});
+
+test("uploads temporary media image with multipart file", async () => {
+  const { fetch, calls } = fetchRecorder({
+    success: true,
+    data: { signed_url: "https://storage.test/signed" },
+  });
+
+  await uploadTempMediaImage({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    filename: "cat.png",
+    file: Buffer.from("png"),
+    fetch,
+  });
+
+  assert.equal(calls[0].url, "https://router.test/v1/temp-media/images");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+  assert.equal(calls[0].init.headers["content-type"], undefined);
+  assert.equal(calls[0].init.body instanceof FormData, true);
 });
 
 test("builds video generation request", async () => {

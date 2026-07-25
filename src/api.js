@@ -14,6 +14,16 @@ export async function generateImage(options) {
   return requestJsonFromPlan(options, planImageRequest(options));
 }
 
+export async function uploadTempMediaImage(options) {
+  const form = new FormData();
+  form.append("file", new Blob([options.file]), options.filename ?? "image");
+  return requestJsonFromPlan(options, planRequest(options, "/v1/temp-media/images", {
+    method: "POST",
+    headers: authHeaders(options.apiKey),
+    body: form,
+  }));
+}
+
 export function planImageRequest(options) {
   const model = options.model ?? "nano-banana-pro-preview";
   if (model.startsWith("gpt")) {
@@ -223,7 +233,11 @@ async function requestJsonFromPlan(options, plan) {
   const response = await fetchImpl(plan.url, {
     method: plan.method,
     headers: plan.headers,
-    body: plan.body === undefined ? undefined : JSON.stringify(plan.body),
+    body: plan.body === undefined
+      ? undefined
+      : isFormData(plan.body)
+        ? plan.body
+        : JSON.stringify(plan.body),
   });
   const body = await readJson(response);
   if (!response.ok) {
@@ -232,6 +246,10 @@ async function requestJsonFromPlan(options, plan) {
     });
   }
   return body;
+}
+
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
 }
 
 async function requestBinaryArtifactFromPlan(options, plan) {

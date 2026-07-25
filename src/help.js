@@ -52,6 +52,7 @@ Commands:
   auth status                    Show saved auth state
   onboard --api-key <key>        Save Flatkey API key from https://console.flatkey.ai/keys
   image generate --prompt <txt>  Generate image
+  image upload --file <path>     Upload local image and return a temporary URL
   video generate --prompt <txt>  Generate video
   audio generate --prompt <txt>  Generate speech with ElevenLabs voices
   audio sfx --prompt <txt>       Generate sound effects
@@ -141,14 +142,18 @@ Options:
 
 Options:
   --ai                           Print agent-focused usage guide`,
-  image: `Usage: flatkey image generate --prompt <txt> [options]
+  image: `Usage: flatkey image <command> [options]
+
+Commands:
+  generate --prompt <txt>        Generate image
+  upload --file <path>           Upload local image and return a temporary URL
 
 Options:
-  --model <model>                Model id
-  --size <size>                  Image size for OpenAI-style image models
-  --quality <quality>             Image quality for supported models
-  --n <count>                    Number of images for supported models
-  --output, -o <file>             Write image file
+  --json                         Print machine-readable JSON`,
+  "image upload": `Usage: flatkey image upload --file <path> [options]
+
+Options:
+  --file <path>                  Local image file to upload
   --json                         Print machine-readable JSON`,
   "image generate": `Usage: flatkey image generate --prompt <txt> [options]
 
@@ -212,9 +217,12 @@ Options:
   --duration <seconds>            Video duration
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
   --resolution <value>            480p, 720p, or 1080p
+  --image <file>                  Upload local reference image, repeatable
   --image-url <url>               Add reference image URL, repeatable
+  --first-frame <file>            Upload local first frame image
   --video-url <url>               Add reference video URL, repeatable
   --first-frame-url <url>         Add first frame image URL
+  --last-frame <file>             Upload local last frame image
   --last-frame-url <url>          Add last frame image URL
   --fps <fps>                    Frames per second
   --output, -o <file>             Write video file
@@ -226,9 +234,12 @@ Options:
   --duration <seconds>            Video duration
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
   --resolution <value>            480p, 720p, or 1080p
+  --image <file>                  Upload local reference image, repeatable
   --image-url <url>               Add reference image URL, repeatable
+  --first-frame <file>            Upload local first frame image
   --video-url <url>               Add reference video URL, repeatable
   --first-frame-url <url>         Add first frame image URL
+  --last-frame <file>             Upload local last frame image
   --last-frame-url <url>          Add last frame image URL
   --fps <fps>                    Frames per second
   --output, -o <file>             Write video file

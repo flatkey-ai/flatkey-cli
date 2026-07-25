@@ -16,7 +16,7 @@ const COMMANDS = new Set([
 
 const GROUP_ACTIONS = new Set(["audio", "auth", "image", "text", "video"]);
 const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "dry_run", "help", "json", "output", "out"]);
-const REPEATABLE_OPTIONS = new Set(["image_url", "video_url"]);
+const REPEATABLE_OPTIONS = new Set(["image", "image_url", "video_url"]);
 const COMMAND_OPTIONS = {
   "audio generate": new Set(["model", "prompt", "similarity_boost", "stability", "style", "voice_id"]),
   "audio music": new Set(["music_length_ms", "prompt"]),
@@ -27,6 +27,7 @@ const COMMAND_OPTIONS = {
   help: new Set(["ai", "command"]),
   image: new Set([]),
   "image generate": new Set(["model", "n", "prompt", "quality", "size"]),
+  "image upload": new Set(["file"]),
   login: new Set(["console_url", "no_open", "open"]),
   logout: new Set([]),
   models: new Set(["type"]),
@@ -36,7 +37,7 @@ const COMMAND_OPTIONS = {
   "text generate": new Set(["model", "prompt"]),
   version: new Set([]),
   video: new Set([]),
-  "video generate": new Set(["aspect", "duration", "first_frame_url", "fps", "image_url", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
+  "video generate": new Set(["aspect", "duration", "first_frame", "first_frame_url", "fps", "image", "image_url", "last_frame", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
 };
 
 export function parseArgv(argv) {
@@ -214,9 +215,14 @@ export async function runCommand(command, deps = {}) {
     }
     const validAction = command.group === "audio"
       ? ["generate", "sfx", "music"].includes(command.action)
-      : command.action === "generate";
+      : command.group === "image"
+        ? ["generate", "upload"].includes(command.action)
+        : command.action === "generate";
     if (!validAction) {
       throw new Error(`Unknown action for ${command.group}: ${command.action}`);
+    }
+    if (command.group === "image" && command.action === "upload") {
+      return handleImageUpload(command, deps);
     }
     return handleGenerate(command, { ...deps, stdout, stderr });
   }
@@ -394,6 +400,46 @@ async function handleAuthStatus(command, deps) {
   return command.options.json ? status : formatAuthStatus(status);
 }
 
+async function handleImageUpload(command, deps) {
+  const { basename } = await import("node:path");
+  const { readFile } = await import("node:fs/promises");
+  const { resolveApiKey, resolveOrigins } = await import("./config.js");
+  const { uploadTempMediaImage } = await import("./api.js");
+  const file = command.options.file;
+  if (typeof file !== "string" || file.trim() === "") {
+    throw new Error("Missing --file value. Run `flatkey image upload --help` to see supported options.");
+  }
+  const apiKey = await resolveApiKey({
+    apiKey: command.options.api_key,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
+  const { routerOrigin } = await resolveOrigins({
+    baseUrl: command.options.base_url,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
+  const response = await uploadTempMediaImage({
+    apiKey,
+    baseUrl: routerOrigin,
+    file: await readFile(await expandHomePath(file)),
+    filename: basename(file),
+    fetch: deps.fetch,
+  });
+  const data = response?.data ?? response;
+  if (!data?.signed_url) {
+    throw new Error("Image upload failed: missing signed_url.");
+  }
+  return {
+    kind: "upload",
+    url: data?.signed_url,
+    objectKey: data?.object_key,
+    expiresAt: data?.expires_at,
+    expiresIn: data?.expires_in,
+    response,
+  };
+}
+
 async function handleGenerate(command, deps) {
   const { resolveApiKey, resolveOrigins } = await import("./config.js");
   const {
@@ -410,6 +456,7 @@ async function handleGenerate(command, deps) {
     planImageRequest,
     planTextRequest,
     planVideoRequest,
+    uploadTempMediaImage,
   } = await import("./api.js");
   const { persistArtifacts } = await import("./artifacts.js");
   const { createAnimation } = await import("./animation.js");
@@ -432,6 +479,9 @@ async function handleGenerate(command, deps) {
     env: deps.env ?? process.env,
     fetch: deps.fetch,
   };
+  if (command.group === "video" && !command.options.dry_run) {
+    await uploadVideoLocalImages(options, { uploadTempMediaImage });
+  }
   if (command.options.dry_run) {
     const request = command.group === "image"
       ? planImageRequest(options)
@@ -482,6 +532,42 @@ async function handleGenerate(command, deps) {
   } finally {
     animation.stop();
   }
+}
+
+async function uploadVideoLocalImages(options, deps) {
+  const localImages = asArray(options.image);
+  const firstFrame = options.first_frame;
+  const lastFrame = options.last_frame;
+  if (localImages.length === 0 && !firstFrame && !lastFrame) return;
+
+  const uploads = [];
+  for (const file of localImages) {
+    uploads.push(await uploadLocalImage(file, options, deps));
+  }
+  if (uploads.length > 0) {
+    options.image_url = [...asArray(options.image_url), ...uploads];
+  }
+  if (firstFrame) {
+    options.first_frame_url = await uploadLocalImage(firstFrame, options, deps);
+  }
+  if (lastFrame) {
+    options.last_frame_url = await uploadLocalImage(lastFrame, options, deps);
+  }
+}
+
+async function uploadLocalImage(file, options, deps) {
+  const { basename } = await import("node:path");
+  const { readFile } = await import("node:fs/promises");
+  const response = await deps.uploadTempMediaImage({
+    apiKey: options.apiKey,
+    baseUrl: options.baseUrl,
+    file: await readFile(await expandHomePath(file)),
+    filename: basename(file),
+    fetch: options.fetch,
+  });
+  const url = response?.data?.signed_url ?? response?.signed_url;
+  if (!url) throw new Error(`Image upload failed: missing signed_url for ${file}`);
+  return url;
 }
 
 async function waitForVideoResult(response, options) {
@@ -669,6 +755,7 @@ function formatHuman(result) {
   if (typeof result === "string") return result;
   if (!result || typeof result !== "object") return String(result);
   if (result.dryRun && result.request) return formatDryRun(result);
+  if (result.kind === "upload") return formatUploadResult(result);
   if (result.kind) return formatGenerationResult(result);
   if (Array.isArray(result.models)) return formatModels(result.models);
   if (Array.isArray(result.voices)) return formatVoices(result.voices);
@@ -685,6 +772,13 @@ function formatDryRun(result) {
     lines.push("Body:");
     lines.push(JSON.stringify(result.request.body, null, 2));
   }
+  return lines.join("\n");
+}
+
+function formatUploadResult(result) {
+  const lines = ["Image uploaded:"];
+  if (result.url) lines.push(`URL: ${result.url}`);
+  if (result.expiresIn) lines.push(`Expires in: ${result.expiresIn}s`);
   return lines.join("\n");
 }
 
