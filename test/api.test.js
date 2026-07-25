@@ -439,6 +439,21 @@ test("throws FlatkeyError with API message on HTTP failure", async () => {
   );
 });
 
+test("throws FlatkeyError when API returns success false with HTTP 200", async () => {
+  const fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { success: false, message: "temp media upload failed" };
+    },
+  });
+
+  await assert.rejects(
+    () => getCredits({ apiKey: "key", baseUrl: "https://router.test", fetch }),
+    (error) => error instanceof FlatkeyError && /temp media upload failed/.test(error.message),
+  );
+});
+
 test("normalizes auth token API messages to login guidance", async () => {
   const fetch = async (url) => ({
     ok: false,

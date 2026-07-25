@@ -91,6 +91,8 @@ test("formats command output as human text by default", async (t) => {
       response.setHeader("content-type", "application/json");
       if (request.url === "/v1/available_models") {
         response.end(JSON.stringify({ data: [{ id: "remote-image", type: "image" }] }));
+      } else if (request.url === "/v1/credits") {
+        response.end(JSON.stringify({ remaining: 8, used: 92 }));
       } else if (request.url === "/v1/status") {
         response.end(JSON.stringify({ status: "ok", remaining: 42 }));
       } else if (request.url === "/v1/video/generations") {
@@ -107,6 +109,7 @@ test("formats command output as human text by default", async (t) => {
   const common = ["--base-url", baseUrl, "--api-key", "test-key"];
 
   const models = await runCli(["models", ...common]);
+  const credits = await runCli(["credits", ...common]);
   const status = await runCli(["status", ...common]);
   const video = await runCli(["video", "generate", "--prompt", "clip", ...common]);
 
@@ -114,8 +117,12 @@ test("formats command output as human text by default", async (t) => {
   assert.match(models.stdout, /Model\s+Type\s+Source/);
   assert.match(models.stdout, /remote-image\s+image\s+remote/);
   assert.doesNotMatch(models.stdout, /^\{/);
+  assert.match(credits.stdout, /Remaining: 8/);
+  assert.match(credits.stdout, /Low credit warning: remaining credits are 8\. Top up soon\./);
+  assert.doesNotMatch(credits.stdout, /^\{/);
   assert.match(status.stdout, /Status: ok/);
   assert.match(status.stdout, /Remaining: 42/);
+  assert.doesNotMatch(status.stdout, /Low credit warning/);
   assert.doesNotMatch(status.stdout, /^\{/);
   assert.match(video.stdout, /Video generated:/);
   assert.match(video.stdout, /URL: https:\/\/cdn\.test\/video\.mp4/);

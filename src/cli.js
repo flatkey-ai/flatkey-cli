@@ -404,7 +404,7 @@ async function handleImageUpload(command, deps) {
   const { basename } = await import("node:path");
   const { readFile } = await import("node:fs/promises");
   const { resolveApiKey, resolveOrigins } = await import("./config.js");
-  const { uploadTempMediaImage } = await import("./api.js");
+  const { DEFAULT_CONSOLE_URL, uploadTempMediaImage } = await import("./api.js");
   const file = command.options.file;
   if (typeof file !== "string" || file.trim() === "") {
     throw new Error("Missing --file value. Run `flatkey image upload --help` to see supported options.");
@@ -421,18 +421,20 @@ async function handleImageUpload(command, deps) {
   });
   const response = await uploadTempMediaImage({
     apiKey,
-    baseUrl: consoleOrigin,
+    baseUrl: consoleOrigin ?? DEFAULT_CONSOLE_URL,
     file: await readFile(await expandHomePath(file)),
     filename: basename(file),
+    contentType: imageContentTypeFromPath(file),
     fetch: deps.fetch,
   });
   const data = response?.data ?? response;
-  if (!data?.signed_url) {
+  const signedUrl = extractUploadedImageUrl(response);
+  if (!signedUrl) {
     throw new Error("Image upload failed: missing signed_url.");
   }
   return {
     kind: "upload",
-    url: data?.signed_url,
+    url: signedUrl,
     objectKey: data?.object_key,
     expiresAt: data?.expires_at,
     expiresIn: data?.expires_in,
@@ -449,6 +451,7 @@ async function handleGenerate(command, deps) {
     generateImage,
     generateText,
     generateVideo,
+    DEFAULT_CONSOLE_URL,
     getVideo,
     planAudioMusicRequest,
     planAudioRequest,
@@ -467,7 +470,7 @@ async function handleGenerate(command, deps) {
         env: deps.env ?? process.env,
         configDir: deps.configDir,
       });
-  const { routerOrigin, consoleOrigin } = await resolveOrigins({
+  const { routerOrigin } = await resolveOrigins({
     baseUrl: command.options.base_url,
     consoleUrl: command.options.console_url,
     env: deps.env ?? process.env,
@@ -482,7 +485,7 @@ async function handleGenerate(command, deps) {
     ...command.options,
     apiKey,
     baseUrl: routerOrigin,
-    tempMediaBaseUrl: tempMediaBaseUrl ?? consoleOrigin,
+    tempMediaBaseUrl: tempMediaBaseUrl ?? DEFAULT_CONSOLE_URL,
     env: deps.env ?? process.env,
     fetch: deps.fetch,
   };
@@ -570,11 +573,25 @@ async function uploadLocalImage(file, options, deps) {
     baseUrl: options.tempMediaBaseUrl ?? options.baseUrl,
     file: await readFile(await expandHomePath(file)),
     filename: basename(file),
+    contentType: imageContentTypeFromPath(file),
     fetch: options.fetch,
   });
-  const url = response?.data?.signed_url ?? response?.signed_url;
+  const url = extractUploadedImageUrl(response);
   if (!url) throw new Error(`Image upload failed: missing signed_url for ${file}`);
   return url;
+}
+
+function extractUploadedImageUrl(response) {
+  const data = response?.data ?? response;
+  return data?.signed_url ?? data?.signedUrl ?? data?.url ?? response?.signed_url ?? response?.signedUrl ?? response?.url;
+}
+
+function imageContentTypeFromPath(file) {
+  const lower = String(file).toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return undefined;
 }
 
 async function waitForVideoResult(response, options) {
@@ -835,9 +852,45 @@ function formatVoices(voices) {
 function formatKeyValues(result) {
   const entries = Object.entries(result);
   if (entries.length === 0) return "OK";
-  return entries
+  const lines = entries
     .map(([key, value]) => `${humanLabel(key)}: ${formatScalar(value)}`)
-    .join("\n");
+  const warning = lowCreditWarning(result);
+  if (warning) lines.push(warning);
+  return lines.join("\n");
+}
+
+function lowCreditWarning(result) {
+  const credits = extractCreditAmount(result);
+  if (credits === undefined || credits >= 10) return "";
+  return `Low credit warning: remaining credits are ${credits}. Top up soon.`;
+}
+
+function extractCreditAmount(result) {
+  const creditKeys = new Set([
+    "credit",
+    "credits",
+    "remaining",
+    "balance",
+    "total_available",
+    "totalAvailable",
+    "available_balance",
+    "availableBalance",
+  ]);
+  const stack = [result];
+  const seen = new Set();
+  while (stack.length > 0) {
+    const value = stack.shift();
+    if (!value || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    for (const [key, entry] of Object.entries(value)) {
+      if (creditKeys.has(key)) {
+        const number = Number(entry);
+        if (Number.isFinite(number)) return number;
+      }
+      if (entry && typeof entry === "object") stack.push(entry);
+    }
+  }
+  return undefined;
 }
 
 function formatScalar(value) {

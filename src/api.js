@@ -16,7 +16,9 @@ export async function generateImage(options) {
 
 export async function uploadTempMediaImage(options) {
   const form = new FormData();
-  form.append("file", new Blob([options.file]), options.filename ?? "image");
+  form.append("file", new Blob([options.file], cleanObject({
+    type: options.contentType,
+  })), options.filename ?? "image");
   return requestJsonFromPlan(options, planRequest(options, "/v1/temp-media/images", {
     method: "POST",
     headers: authHeaders(options.apiKey),
@@ -240,7 +242,7 @@ async function requestJsonFromPlan(options, plan) {
         : JSON.stringify(plan.body),
   });
   const body = await readJson(response);
-  if (!response.ok) {
+  if (!response.ok || body?.success === false) {
     throw new FlatkeyError(extractErrorMessage(body, response.status), {
       status: response.status,
     });

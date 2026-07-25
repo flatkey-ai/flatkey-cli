@@ -466,7 +466,7 @@ test("command origins override origin env vars", async () => {
 
 test("image upload posts local file to temp media endpoint", async () => {
   const dir = await mkdtemp(join(tmpdir(), "flatkey-upload-"));
-  const file = join(dir, "cat.png");
+  const file = join(dir, "cat.jpg");
   await writeFile(file, "image-bytes");
   const calls = [];
 
@@ -476,7 +476,6 @@ test("image upload posts local file to temp media endpoint", async () => {
     options: {
       file,
       api_key: "key",
-      console_url: "https://console.test",
       json: true,
     },
   }, {
@@ -493,10 +492,36 @@ test("image upload posts local file to temp media endpoint", async () => {
     },
   });
 
-  assert.equal(calls[0].url, "https://console.test/v1/temp-media/images");
+  assert.equal(calls[0].url, "https://console.flatkey.ai/v1/temp-media/images");
   assert.equal(calls[0].init.body instanceof FormData, true);
+  assert.equal(calls[0].init.body.get("file").type, "image/jpeg");
   assert.equal(result.url, "https://storage.test/cat.png");
   assert.equal(result.objectKey, "temp-media/1/cat.png");
+});
+
+test("image upload accepts url field aliases", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-upload-url-"));
+  const file = join(dir, "cat.png");
+  await writeFile(file, "image-bytes");
+
+  const result = await runCommand({
+    group: "image",
+    action: "upload",
+    options: {
+      file,
+      api_key: "key",
+      json: true,
+    },
+  }, {
+    fetch: async () => jsonResponse({
+      success: true,
+      data: {
+        url: "https://storage.test/cat.png",
+      },
+    }),
+  });
+
+  assert.equal(result.url, "https://storage.test/cat.png");
 });
 
 test("video generation uploads local image references before request", async () => {
@@ -513,7 +538,6 @@ test("video generation uploads local image references before request", async () 
       image: [image],
       api_key: "key",
       base_url: "https://router.test",
-      console_url: "https://console.test",
       json: true,
     },
   }, {
@@ -528,7 +552,8 @@ test("video generation uploads local image references before request", async () 
 
   const videoCall = calls.find((call) => call.url.endsWith("/v1/video/generations"));
   const uploadCall = calls.find((call) => call.url.endsWith("/v1/temp-media/images"));
-  assert.equal(uploadCall?.url, "https://console.test/v1/temp-media/images");
+  assert.equal(uploadCall?.url, "https://console.flatkey.ai/v1/temp-media/images");
+  assert.equal(uploadCall?.init.body.get("file").type, "image/png");
   assert.equal(videoCall?.url, "https://router.test/v1/video/generations");
   assert.ok(videoCall);
   assert.deepEqual(JSON.parse(videoCall.init.body).content, [
