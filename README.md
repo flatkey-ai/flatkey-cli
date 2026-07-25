@@ -92,6 +92,12 @@ flatkey image generate \
   -o cover.png
 ```
 
+Upload a local image and get a temporary signed URL:
+
+```bash
+flatkey image upload --file ./reference.png
+```
+
 ### Generate Video
 
 ```bash
@@ -105,6 +111,27 @@ flatkey video generate \
 
 Video ratios: `16:9`, `9:16`, `4:3`, `3:4`, `21:9`, `1:1`.
 Video resolutions: `480p`, `720p`, `1080p`.
+
+Local reference images are uploaded through Flatkey temporary media first:
+
+```bash
+flatkey video generate \
+  --model Seedance2.0-pro \
+  --prompt "a sleepy kitten, soft window light" \
+  --image ./reference.png \
+  -o kitten.mp4
+```
+
+First/last frame:
+
+```bash
+flatkey video generate \
+  --model Seedance2.0-pro \
+  --prompt "slow camera push-in" \
+  --first-frame ./first.png \
+  --last-frame ./last.png \
+  -o transition.mp4
+```
 
 ### Generate Audio
 
@@ -196,6 +223,8 @@ Agent rules:
 - Prefer `FLATKEY_API_KEY`.
 - Always pass `--json` for machine-readable output.
 - Use `--output` / `-o` when the generated file path matters.
+- Use `flatkey image upload --file <path>` for a temporary signed image URL.
+- Use `--image`, `--first-frame`, or `--last-frame` to pass local images into video generation.
 - Call `flatkey models --json` before choosing a model.
 - Call `flatkey audio voices --json` before choosing a TTS `voice_id`.
 - Use `--dry-run` to inspect request shape without spending credits.
