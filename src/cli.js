@@ -15,7 +15,7 @@ const COMMANDS = new Set([
 ]);
 
 const GROUP_ACTIONS = new Set(["audio", "auth", "image", "text", "video"]);
-const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "dry_run", "help", "json", "output", "out"]);
+const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "console_url", "dry_run", "help", "json", "output", "out"]);
 const REPEATABLE_OPTIONS = new Set(["image", "image_url", "video_url"]);
 const COMMAND_OPTIONS = {
   "audio generate": new Set(["model", "prompt", "similarity_boost", "stability", "style", "voice_id"]),
@@ -414,14 +414,14 @@ async function handleImageUpload(command, deps) {
     env: deps.env ?? process.env,
     configDir: deps.configDir,
   });
-  const { routerOrigin } = await resolveOrigins({
-    baseUrl: command.options.base_url,
+  const { consoleOrigin } = await resolveOrigins({
+    consoleUrl: command.options.console_url,
     env: deps.env ?? process.env,
     configDir: deps.configDir,
   });
   const response = await uploadTempMediaImage({
     apiKey,
-    baseUrl: routerOrigin,
+    baseUrl: consoleOrigin,
     file: await readFile(await expandHomePath(file)),
     filename: basename(file),
     fetch: deps.fetch,
@@ -467,8 +467,14 @@ async function handleGenerate(command, deps) {
         env: deps.env ?? process.env,
         configDir: deps.configDir,
       });
-  const { routerOrigin } = await resolveOrigins({
+  const { routerOrigin, consoleOrigin } = await resolveOrigins({
     baseUrl: command.options.base_url,
+    consoleUrl: command.options.console_url,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
+  const { consoleOrigin: tempMediaBaseUrl } = await resolveOrigins({
+    consoleUrl: command.options.console_url,
     env: deps.env ?? process.env,
     configDir: deps.configDir,
   });
@@ -476,6 +482,7 @@ async function handleGenerate(command, deps) {
     ...command.options,
     apiKey,
     baseUrl: routerOrigin,
+    tempMediaBaseUrl: tempMediaBaseUrl ?? consoleOrigin,
     env: deps.env ?? process.env,
     fetch: deps.fetch,
   };
@@ -560,7 +567,7 @@ async function uploadLocalImage(file, options, deps) {
   const { readFile } = await import("node:fs/promises");
   const response = await deps.uploadTempMediaImage({
     apiKey: options.apiKey,
-    baseUrl: options.baseUrl,
+    baseUrl: options.tempMediaBaseUrl ?? options.baseUrl,
     file: await readFile(await expandHomePath(file)),
     filename: basename(file),
     fetch: options.fetch,

@@ -476,7 +476,7 @@ test("image upload posts local file to temp media endpoint", async () => {
     options: {
       file,
       api_key: "key",
-      base_url: "https://router.test",
+      console_url: "https://console.test",
       json: true,
     },
   }, {
@@ -493,7 +493,7 @@ test("image upload posts local file to temp media endpoint", async () => {
     },
   });
 
-  assert.equal(calls[0].url, "https://router.test/v1/temp-media/images");
+  assert.equal(calls[0].url, "https://console.test/v1/temp-media/images");
   assert.equal(calls[0].init.body instanceof FormData, true);
   assert.equal(result.url, "https://storage.test/cat.png");
   assert.equal(result.objectKey, "temp-media/1/cat.png");
@@ -513,6 +513,7 @@ test("video generation uploads local image references before request", async () 
       image: [image],
       api_key: "key",
       base_url: "https://router.test",
+      console_url: "https://console.test",
       json: true,
     },
   }, {
@@ -526,6 +527,9 @@ test("video generation uploads local image references before request", async () 
   });
 
   const videoCall = calls.find((call) => call.url.endsWith("/v1/video/generations"));
+  const uploadCall = calls.find((call) => call.url.endsWith("/v1/temp-media/images"));
+  assert.equal(uploadCall?.url, "https://console.test/v1/temp-media/images");
+  assert.equal(videoCall?.url, "https://router.test/v1/video/generations");
   assert.ok(videoCall);
   assert.deepEqual(JSON.parse(videoCall.init.body).content, [
     { type: "text", text: "clip" },
