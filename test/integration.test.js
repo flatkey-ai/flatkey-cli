@@ -238,6 +238,20 @@ test("generation commands write explicit output files", async (t) => {
       } else if (request.url === "/v1/chat/completions") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ choices: [{ message: { content: "text-file" } }] }));
+      } else if (request.url === "/v1/video/generations") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ id: "task_123", object: "video", status: "queued" }));
+      } else if (request.url === "/v1/videos/task_123") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({
+          id: "task_123",
+          object: "video",
+          status: "completed",
+          content: [{ type: "video_url", video_url: { url: `${baseUrl}/video.mp4` } }],
+        }));
+      } else if (request.url === "/video.mp4") {
+        response.setHeader("content-type", "video/mp4");
+        response.end("video-file");
       } else {
         response.setHeader("content-type", "application/json");
         response.statusCode = 404;
@@ -250,6 +264,7 @@ test("generation commands write explicit output files", async (t) => {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const dir = await mkdtemp(join(tmpdir(), "flatkey-output-"));
   const imageOutput = join(dir, "poster.png");
+  const videoOutput = join(dir, "clip.mp4");
   const audioOutput = join(dir, "speech.mp3");
   const textOutput = join(dir, "headline.txt");
 
@@ -283,11 +298,22 @@ test("generation commands write explicit output files", async (t) => {
     audioOutput,
     ...common,
   ]);
+  const video = await runCli([
+    "video",
+    "generate",
+    "--prompt",
+    "clip",
+    "--output",
+    videoOutput,
+    ...common,
+  ]);
 
   assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ path: imageOutput }]);
   assert.equal(await readFile(imageOutput, "utf8"), "image-file");
   assert.equal(JSON.parse(image.stdout).response.data[0].b64_json, "<artifact omitted>");
   assert.doesNotMatch(image.stdout, /aW1hZ2UtZmlsZQ==/);
+  assert.deepEqual(JSON.parse(video.stdout).artifacts, [{ path: videoOutput }]);
+  assert.equal(await readFile(videoOutput, "utf8"), "video-file");
   assert.deepEqual(JSON.parse(audio.stdout).artifacts, [{ path: audioOutput }]);
   assert.equal(await readFile(audioOutput, "utf8"), "audio-file");
   assert.equal(JSON.parse(text.stdout).output, textOutput);

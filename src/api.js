@@ -43,6 +43,10 @@ export function generateVideo(options) {
   return requestJsonFromPlan(options, planVideoRequest(options));
 }
 
+export function getVideo(options, taskId) {
+  return requestJsonFromPlan(options, planVideoStatusRequest(options, taskId));
+}
+
 export function planVideoRequest(options) {
   const model = options.model ?? "seedance-2.0-pro";
   const imageUrls = [
@@ -82,6 +86,10 @@ export function planVideoRequest(options) {
     }));
   }
   return planJsonPost(options, "/v1/video/generations", basePayload);
+}
+
+export function planVideoStatusRequest(options, taskId) {
+  return planRequest(options, `/v1/videos/${encodeURIComponent(taskId)}`);
 }
 
 export function generateAudio(options) {

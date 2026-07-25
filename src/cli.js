@@ -403,6 +403,7 @@ async function handleGenerate(command, deps) {
     generateImage,
     generateText,
     generateVideo,
+    getVideo,
     planAudioMusicRequest,
     planAudioRequest,
     planAudioSfxRequest,
@@ -428,6 +429,7 @@ async function handleGenerate(command, deps) {
     ...command.options,
     apiKey,
     baseUrl: routerOrigin,
+    env: deps.env ?? process.env,
     fetch: deps.fetch,
   };
   if (command.options.dry_run) {
@@ -461,6 +463,9 @@ async function handleGenerate(command, deps) {
               ? await generateAudioMusic(options)
               : await generateAudio(options)
           : await generateText(options);
+    const artifactResponse = command.group === "video"
+      ? await waitForVideoResult(response, { ...options, getVideo, sleep: deps.sleep })
+      : response;
     if (command.group === "text") {
       const text = extractText(response);
       const output = await writeTextOutput(text, command.options.output);
@@ -468,15 +473,73 @@ async function handleGenerate(command, deps) {
     }
     const artifacts = await persistArtifacts({
       kind: command.group,
-      response,
+      response: artifactResponse,
       outDir: command.options.out ?? "flatkey-output",
       output: command.options.output,
       fetch: deps.fetch,
     });
-    return { kind: command.group, artifacts, response: scrubArtifactResponse(response) };
+    return { kind: command.group, artifacts, response: scrubArtifactResponse(artifactResponse) };
   } finally {
     animation.stop();
   }
+}
+
+async function waitForVideoResult(response, options) {
+  if (hasArtifact(response)) return response;
+  const taskId = videoTaskId(response);
+  if (!taskId) return response;
+
+  const timeoutMs = parsePositiveInteger(
+    options.video_wait_timeout_ms ?? options.env?.FLATKEY_VIDEO_WAIT_TIMEOUT_MS,
+    600_000,
+  );
+  const intervalMs = parsePositiveInteger(
+    options.video_poll_interval_ms ?? options.env?.FLATKEY_VIDEO_POLL_INTERVAL_MS,
+    5_000,
+  );
+  const deadline = Date.now() + timeoutMs;
+  let last = response;
+
+  while (Date.now() <= deadline) {
+    last = await options.getVideo(options, taskId);
+    if (hasArtifact(last) || isVideoDone(last)) return last;
+    if (isVideoFailed(last)) {
+      const message = last?.error?.message ?? last?.message ?? `Video generation failed: ${taskId}`;
+      throw new Error(message);
+    }
+    await delay(intervalMs, { sleep: options.sleep });
+  }
+
+  throw new Error(`Video task still processing after ${Math.round(timeoutMs / 1000)}s: ${taskId}`);
+}
+
+function hasArtifact(response) {
+  return Boolean(
+    response?.metadata?.url
+      || response?.url
+      || response?.video_url?.url
+      || response?.data?.some?.((item) => item?.url || item?.b64_json || item?.base64 || item?.data)
+      || response?.artifacts?.some?.((item) => item?.url || item?.path)
+      || response?.content?.some?.((item) => item?.url || item?.video_url?.url || item?.data_url || item?.b64_json || item?.base64 || item?.data),
+  );
+}
+
+function videoTaskId(response) {
+  return firstNonEmpty(response?.id, response?.task_id, response?.taskId, response?.data?.id, response?.data?.task_id);
+}
+
+function isVideoDone(response) {
+  return ["completed", "succeeded", "success"].includes(String(response?.status ?? "").toLowerCase());
+}
+
+function isVideoFailed(response) {
+  return ["failed", "failure", "cancelled", "canceled"].includes(String(response?.status ?? "").toLowerCase())
+    || Boolean(response?.error);
+}
+
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function scrubArtifactResponse(value) {

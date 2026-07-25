@@ -121,3 +121,19 @@ test("downloads remote url artifact when explicit output path is set", async () 
   assert.deepEqual(artifacts, [{ path: output }]);
   assert.equal(await readFile(output, "utf8"), "video-bytes");
 });
+
+test("extracts OpenAI video content url artifact", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
+
+  const artifacts = await persistArtifacts({
+    kind: "video",
+    outDir,
+    response: {
+      id: "task_123",
+      status: "completed",
+      content: [{ type: "video_url", video_url: { url: "https://cdn.test/video.mp4" } }],
+    },
+  });
+
+  assert.deepEqual(artifacts, [{ url: "https://cdn.test/video.mp4" }]);
+});

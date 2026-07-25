@@ -47,7 +47,7 @@ function expandHomePath(path) {
 }
 
 async function persistItem({ kind, item, outDir, output, index, fetchImpl }) {
-  const dataUrl = getString(item, ["url", "data_url", "dataUrl"]);
+  const dataUrl = getString(item, ["url", "video_url", "data_url", "dataUrl"]);
   if (dataUrl?.startsWith("data:")) {
     const parsed = parseDataUrl(dataUrl);
     const path = artifactPath({ kind, outDir, output, index, extension: parsed.extension });
@@ -90,15 +90,20 @@ async function downloadArtifact({ url, path, fetchImpl }) {
 function extractItems(response) {
   if (Array.isArray(response?.data)) return response.data;
   if (Array.isArray(response?.artifacts)) return response.artifacts;
+  if (Array.isArray(response?.content)) return response.content;
   if (Array.isArray(response?.candidates)) {
     return response.candidates.flatMap((candidate) => candidate.content?.parts ?? []);
   }
+  if (typeof response?.metadata?.url === "string") return [{ url: response.metadata.url }];
+  if (typeof response?.url === "string") return [response];
+  if (typeof response?.video_url?.url === "string") return [{ url: response.video_url.url }];
   return [];
 }
 
 function getString(item, keys) {
   for (const key of keys) {
     if (typeof item?.[key] === "string") return item[key];
+    if (typeof item?.[key]?.url === "string") return item[key].url;
     if (typeof item?.inlineData?.[key] === "string") return item.inlineData[key];
     if (typeof item?.inline_data?.[key] === "string") return item.inline_data[key];
   }
