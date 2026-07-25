@@ -118,8 +118,9 @@ test("video request keeps aspect alias for ratio", () => {
     prompt: "walkthrough",
     aspect: "9:16",
   }).body, {
-    model: "veo-3",
+    model: "seedance-2.0-pro",
     prompt: "walkthrough",
+    content: [{ type: "text", text: "walkthrough" }],
     aspect: "9:16",
     ratio: "9:16",
   });
@@ -156,7 +157,63 @@ test("builds seedance2 video generation request", async () => {
   });
 
   assert.equal(calls[0].url, "https://router.test/v1/video/generations");
-  assert.equal(JSON.parse(calls[0].init.body).model, "seedance2");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    model: "seedance2",
+    prompt: "newsroom b-roll",
+    content: [{ type: "text", text: "newsroom b-roll" }],
+  });
+});
+
+test("builds seedance video request with official content payload", () => {
+  assert.deepEqual(planVideoRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "Seedance2.0-pro",
+    prompt: "小猫睡觉",
+    output: "a.mp4",
+  }).body, {
+    model: "Seedance2.0-pro",
+    prompt: "小猫睡觉",
+    content: [{ type: "text", text: "小猫睡觉" }],
+  });
+});
+
+test("builds seedance video request with reference media content", () => {
+  assert.deepEqual(planVideoRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "seedance-2.0-pro",
+    prompt: "小猫睡觉",
+    image_url: ["https://example.com/a.png", "https://example.com/b.png"],
+    video_url: ["https://example.com/ref.mp4"],
+    first_frame_url: "https://example.com/first.png",
+    last_frame_url: "https://example.com/last.png",
+  }).body, {
+    model: "seedance-2.0-pro",
+    prompt: "小猫睡觉",
+    content: [
+      { type: "text", text: "小猫睡觉" },
+      { type: "image_url", image_url: { url: "https://example.com/a.png" }, role: "reference_image" },
+      { type: "image_url", image_url: { url: "https://example.com/b.png" }, role: "reference_image" },
+      { type: "image_url", image_url: { url: "https://example.com/first.png" }, role: "first_frame" },
+      { type: "image_url", image_url: { url: "https://example.com/last.png" }, role: "last_frame" },
+      { type: "video_url", video_url: { url: "https://example.com/ref.mp4" }, role: "reference_video" },
+    ],
+  });
+});
+
+test("passes image references to generic video request images", () => {
+  assert.deepEqual(planVideoRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "veo-3",
+    prompt: "walkthrough",
+    image_url: ["https://example.com/a.png"],
+  }).body, {
+    model: "veo-3",
+    prompt: "walkthrough",
+    images: ["https://example.com/a.png"],
+  });
 });
 
 test("builds text generation request for gpt-5.5", async () => {

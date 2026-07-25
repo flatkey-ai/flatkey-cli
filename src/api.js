@@ -44,6 +44,15 @@ export function generateVideo(options) {
 }
 
 export function planVideoRequest(options) {
+  const model = options.model ?? "seedance-2.0-pro";
+  const imageUrls = [
+    ...arrayOption(options.image_url),
+    ...arrayOption(options.imageUrl),
+    ...arrayOption(options.first_frame_url),
+    ...arrayOption(options.firstFrameUrl),
+    ...arrayOption(options.last_frame_url),
+    ...arrayOption(options.lastFrameUrl),
+  ];
   const ratio = validateOptionalValue(
     optionValue(options, "ratio", "aspect"),
     ["16:9", "9:16", "4:3", "3:4", "21:9", "1:1"],
@@ -54,8 +63,8 @@ export function planVideoRequest(options) {
     ["480p", "720p", "1080p"],
     "resolution",
   );
-  return planJsonPost(options, "/v1/video/generations", cleanObject({
-    model: options.model ?? "veo-3",
+  const basePayload = cleanObject({
+    model,
     prompt: options.prompt,
     duration: parseOptionalInteger(options.duration),
     aspect: ratio,
@@ -63,7 +72,16 @@ export function planVideoRequest(options) {
     resolution,
     quality: resolution,
     fps: parseOptionalInteger(options.fps),
-  }));
+    images: !isSeedanceModel(model) && imageUrls.length > 0 ? imageUrls : undefined,
+  });
+  const seedanceContent = buildSeedanceContent(options);
+  if (isSeedanceModel(model) && seedanceContent.length > 0) {
+    return planJsonPost(options, "/v1/video/generations", cleanObject({
+      ...basePayload,
+      content: seedanceContent,
+    }));
+  }
+  return planJsonPost(options, "/v1/video/generations", basePayload);
 }
 
 export function generateAudio(options) {
@@ -273,6 +291,47 @@ function validateOptionalValue(value, allowed, name) {
   if (value === undefined) return undefined;
   if (allowed.includes(value)) return value;
   throw new Error(`Invalid ${name}: ${value}. Allowed values: ${allowed.join(", ")}`);
+}
+
+function isSeedanceModel(model) {
+  return /seedance/i.test(model);
+}
+
+function buildSeedanceContent(options) {
+  const content = [];
+  if (options.prompt !== undefined) {
+    content.push({ type: "text", text: options.prompt });
+  }
+  for (const url of arrayOption(options.image_url)) {
+    content.push({ type: "image_url", image_url: { url }, role: "reference_image" });
+  }
+  for (const url of arrayOption(options.imageUrl)) {
+    content.push({ type: "image_url", image_url: { url }, role: "reference_image" });
+  }
+  for (const url of arrayOption(options.first_frame_url)) {
+    content.push({ type: "image_url", image_url: { url }, role: "first_frame" });
+  }
+  for (const url of arrayOption(options.firstFrameUrl)) {
+    content.push({ type: "image_url", image_url: { url }, role: "first_frame" });
+  }
+  for (const url of arrayOption(options.last_frame_url)) {
+    content.push({ type: "image_url", image_url: { url }, role: "last_frame" });
+  }
+  for (const url of arrayOption(options.lastFrameUrl)) {
+    content.push({ type: "image_url", image_url: { url }, role: "last_frame" });
+  }
+  for (const url of arrayOption(options.video_url)) {
+    content.push({ type: "video_url", video_url: { url }, role: "reference_video" });
+  }
+  for (const url of arrayOption(options.videoUrl)) {
+    content.push({ type: "video_url", video_url: { url }, role: "reference_video" });
+  }
+  return content;
+}
+
+function arrayOption(value) {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 function cleanObject(value) {

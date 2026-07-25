@@ -16,6 +16,7 @@ const COMMANDS = new Set([
 
 const GROUP_ACTIONS = new Set(["audio", "auth", "image", "text", "video"]);
 const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "dry_run", "help", "json", "output", "out"]);
+const REPEATABLE_OPTIONS = new Set(["image_url", "video_url"]);
 const COMMAND_OPTIONS = {
   "audio generate": new Set(["model", "prompt", "similarity_boost", "stability", "style", "voice_id"]),
   "audio music": new Set(["music_length_ms", "prompt"]),
@@ -35,7 +36,7 @@ const COMMAND_OPTIONS = {
   "text generate": new Set(["model", "prompt"]),
   version: new Set([]),
   video: new Set([]),
-  "video generate": new Set(["aspect", "duration", "fps", "model", "prompt", "ratio", "resolution"]),
+  "video generate": new Set(["aspect", "duration", "first_frame_url", "fps", "image_url", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
 };
 
 export function parseArgv(argv) {
@@ -115,10 +116,19 @@ function parseOptions(tokens) {
       options[name] = true;
       continue;
     }
-    options[name] = next;
+    if (REPEATABLE_OPTIONS.has(name)) {
+      options[name] = [...asArray(options[name]), next];
+    } else {
+      options[name] = next;
+    }
     index += 1;
   }
   return options;
+}
+
+function asArray(value) {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 function validateCommandOptions(command) {
@@ -215,15 +225,11 @@ export async function runCommand(command, deps = {}) {
 }
 
 async function handleLogin(command, deps) {
-  const { ensureDeviceId, readConfig, resolveOrigins, writeAuthConfig } = await import("./config.js");
-  const { createDeviceAuthorization, pollDeviceAuthorization } = await import("./api.js");
+  const { ensureDeviceId, readConfig, writeAuthConfig } = await import("./config.js");
+  const { DEFAULT_CONSOLE_URL, createDeviceAuthorization, pollDeviceAuthorization } = await import("./api.js");
   const deviceId = await ensureDeviceId({ configDir: deps.configDir });
   const version = await readPackageVersion();
-  const { consoleOrigin } = await resolveOrigins({
-    consoleUrl: command.options.console_url,
-    env: deps.env ?? process.env,
-    configDir: deps.configDir,
-  });
+  const consoleOrigin = firstNonEmpty(command.options.console_url, DEFAULT_CONSOLE_URL);
   const authorization = await createDeviceAuthorization({
     consoleUrl: consoleOrigin,
     deviceId,

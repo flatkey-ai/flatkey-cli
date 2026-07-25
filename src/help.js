@@ -208,20 +208,28 @@ Options:
   video: `Usage: flatkey video generate --prompt <txt> [options]
 
 Options:
-  --model <model>                Model id, default veo-3
+  --model <model>                Model id, default seedance-2.0-pro
   --duration <seconds>            Video duration
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
   --resolution <value>            480p, 720p, or 1080p
+  --image-url <url>               Add reference image URL, repeatable
+  --video-url <url>               Add reference video URL, repeatable
+  --first-frame-url <url>         Add first frame image URL
+  --last-frame-url <url>          Add last frame image URL
   --fps <fps>                    Frames per second
   --output, -o <file>             Write video file
   --json                         Print machine-readable JSON`,
   "video generate": `Usage: flatkey video generate --prompt <txt> [options]
 
 Options:
-  --model <model>                Model id, default veo-3
+  --model <model>                Model id, default seedance-2.0-pro
   --duration <seconds>            Video duration
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
   --resolution <value>            480p, 720p, or 1080p
+  --image-url <url>               Add reference image URL, repeatable
+  --video-url <url>               Add reference video URL, repeatable
+  --first-frame-url <url>         Add first frame image URL
+  --last-frame-url <url>          Add last frame image URL
   --fps <fps>                    Frames per second
   --output, -o <file>             Write video file
   --json                         Print machine-readable JSON`,

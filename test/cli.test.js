@@ -97,6 +97,33 @@ test("parses video ratio and resolution controls", () => {
   });
 });
 
+test("parses repeatable video reference controls", () => {
+  const command = parseArgv([
+    "video",
+    "generate",
+    "--prompt",
+    "clip",
+    "--image-url",
+    "https://example.com/a.png",
+    "--image-url",
+    "https://example.com/b.png",
+    "--video-url",
+    "https://example.com/ref.mp4",
+    "--first-frame-url",
+    "https://example.com/first.png",
+    "--last-frame-url",
+    "https://example.com/last.png",
+  ]);
+
+  assert.deepEqual(command.options, {
+    prompt: "clip",
+    image_url: ["https://example.com/a.png", "https://example.com/b.png"],
+    video_url: ["https://example.com/ref.mp4"],
+    first_frame_url: "https://example.com/first.png",
+    last_frame_url: "https://example.com/last.png",
+  });
+});
+
 test("parses audio voice generation controls", () => {
   const command = parseArgv([
     "audio",
@@ -345,6 +372,30 @@ test("empty origin env vars fall back to default origins", async () => {
     options: { json: true, no_open: true },
   }, {
     env: { CONSOLE_ORIGIN: "" },
+    sleep: async () => {},
+    fetch: async (url) => {
+      fetchCalls.push(url);
+      return url.endsWith("/token")
+        ? jsonResponse({ status: "approved", api_key: "sk-login", token_id: 9, user_id: 7 })
+        : jsonResponse({
+          device_code: "device-code",
+          verification_uri_complete: "https://console.flatkey.ai/cli/authorize",
+          expires_in: 600,
+          interval: 5,
+        });
+    },
+  });
+  assert.equal(fetchCalls[0], "https://console.flatkey.ai/api/cli/device_authorizations");
+});
+
+test("login defaults to production console even when console env is set", async () => {
+  const fetchCalls = [];
+  await runCommand({
+    group: "login",
+    action: undefined,
+    options: { json: true, no_open: true },
+  }, {
+    env: { CONSOLE_ORIGIN: "https://staging-console.test" },
     sleep: async () => {},
     fetch: async (url) => {
       fetchCalls.push(url);
