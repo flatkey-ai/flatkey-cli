@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { parseArgv, runCommand } from "../src/cli.js";
-import { writeConfig } from "../src/config.js";
+import { writeAuthConfig, writeConfig } from "../src/config.js";
 
 test("parses image generation with prompt and json mode", () => {
   const command = parseArgv(["image", "generate", "--prompt", "city at dawn", "--json"]);
@@ -266,6 +266,7 @@ test("browser login prints approval URL and saves returned API key", async () =>
         api_key: "sk-login",
         token_id: 9,
         user_id: 7,
+        email: "user@example.com",
       });
     },
   });
@@ -281,6 +282,7 @@ test("browser login prints approval URL and saves returned API key", async () =>
   assert.equal(saved.auth.type, "device");
   assert.equal(saved.auth.userId, 7);
   assert.equal(saved.auth.tokenId, 9);
+  assert.deepEqual(saved.auth.account, { email: "user@example.com", userId: 7 });
   assert.equal(typeof saved.auth.deviceId, "string");
 });
 
@@ -333,7 +335,12 @@ test("browser login reuses saved config when approved authorization is already c
     configDir,
     sleep: async () => {},
     fetch: async (url) => url.endsWith("/token")
-      ? jsonResponse({ status: "approved", token_id: 9, user_id: 7 })
+      ? jsonResponse({
+        status: "approved",
+        token_id: 9,
+        user_id: 7,
+        account: { email: "user@example.com" },
+      })
       : jsonResponse({
         device_code: "device-code",
         verification_uri_complete: "https://console.test/cli/authorize?user_code=ABCD-EFGH",
@@ -346,12 +353,14 @@ test("browser login reuses saved config when approved authorization is already c
   assert.equal(result.reusedConfig, true);
   assert.equal(result.tokenId, 9);
   assert.equal(result.userId, 7);
+  assert.deepEqual(result.account, { email: "user@example.com", userId: 7 });
 
   const saved = JSON.parse(await readFile(join(configDir, "config.json"), "utf8"));
   assert.equal(saved.apiKey, "sk-saved");
   assert.equal(saved.auth.type, "device");
   assert.equal(saved.auth.tokenId, 9);
   assert.equal(saved.auth.userId, 7);
+  assert.deepEqual(saved.auth.account, { email: "user@example.com", userId: 7 });
 });
 
 test("origin env vars switch router and console APIs", async () => {
@@ -384,6 +393,51 @@ test("origin env vars switch router and console APIs", async () => {
     },
   });
   assert.equal(fetchCalls[0], "https://staging-console.test/v1/credits");
+});
+
+test("status includes effective saved account", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  await writeAuthConfig({
+    apiKey: "sk-saved",
+    auth: { userId: 7, tokenId: 9, account: { email: "user@example.com", userId: 7 } },
+    configDir,
+  });
+
+  const status = await runCommand({
+    group: "status",
+    action: undefined,
+    options: { json: true },
+  }, {
+    configDir,
+    env: {},
+    fetch: async () => jsonResponse({ status: "ok" }),
+  });
+
+  assert.deepEqual(status, {
+    status: "ok",
+    account: { email: "user@example.com", userId: 7 },
+  });
+});
+
+test("status does not attach stale saved account for option api key", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
+  await writeAuthConfig({
+    apiKey: "sk-saved",
+    auth: { userId: 7 },
+    configDir,
+  });
+
+  const status = await runCommand({
+    group: "status",
+    action: undefined,
+    options: { json: true, api_key: "sk-option" },
+  }, {
+    configDir,
+    env: {},
+    fetch: async () => jsonResponse({ status: "ok" }),
+  });
+
+  assert.deepEqual(status, { status: "ok" });
 });
 
 test("empty origin env vars fall back to default origins", async () => {

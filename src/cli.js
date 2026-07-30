@@ -276,6 +276,7 @@ async function handleLogin(command, deps) {
               deviceId,
               userId: pollData.user_id ?? saved.auth?.userId,
               tokenId: pollData.token_id ?? saved.auth?.tokenId,
+              account: accountFromAuthData(pollData) ?? saved.auth?.account,
               loginAt: Math.floor(Date.now() / 1000),
             },
             configDir: deps.configDir,
@@ -286,6 +287,7 @@ async function handleLogin(command, deps) {
               configPath,
               tokenId: pollData.token_id ?? saved.auth?.tokenId,
               userId: pollData.user_id ?? saved.auth?.userId,
+              account: accountFromAuthData(pollData) ?? saved.auth?.account,
               reusedConfig: true,
             }
             : `Flatkey CLI already authorized. Saved config: ${configPath}`;
@@ -298,12 +300,19 @@ async function handleLogin(command, deps) {
           deviceId,
           userId: pollData.user_id,
           tokenId: pollData.token_id,
+          account: accountFromAuthData(pollData),
           loginAt: Math.floor(Date.now() / 1000),
         },
         configDir: deps.configDir,
       });
       return command.options.json
-        ? { success: true, configPath, tokenId: pollData.token_id, userId: pollData.user_id }
+        ? {
+          success: true,
+          configPath,
+          tokenId: pollData.token_id,
+          userId: pollData.user_id,
+          account: accountFromAuthData(pollData),
+        }
         : `Flatkey CLI authorized. Saved config: ${configPath}`;
     }
     if (pollData?.status === "denied") {
@@ -732,7 +741,8 @@ function redactRequest(request) {
 }
 
 async function handleUtility(command, deps) {
-  const { resolveApiKey, resolveOrigins } = await import("./config.js");
+  const { readConfig, resolveApiKey, resolveOrigins } = await import("./config.js");
+  const saved = await readConfig(deps.configDir);
   const { getCredits, getStatus } = await import("./api.js");
   const apiKey = await resolveApiKey({
     apiKey: command.options.api_key,
@@ -749,7 +759,33 @@ async function handleUtility(command, deps) {
     baseUrl: consoleOrigin,
     fetch: deps.fetch,
   };
-  return command.group === "credits" ? getCredits(options) : getStatus(options);
+  if (command.group === "credits") return getCredits(options);
+
+  const status = await getStatus(options);
+  const account = effectiveAccountForStatus({ command, saved, apiKey });
+  if (!account || !status || typeof status !== "object" || Array.isArray(status) || status.account !== undefined) {
+    return status;
+  }
+  return { ...status, account };
+}
+
+function effectiveAccountForStatus({ command, saved, apiKey }) {
+  if (command.options.api_key || !saved?.apiKey || saved.apiKey !== apiKey) return null;
+  if (saved.auth?.account !== undefined) return saved.auth.account;
+  return accountFromAuthData(saved.auth);
+}
+
+function accountFromAuthData(data) {
+  if (!data || typeof data !== "object") return null;
+  const email = data.account?.email ?? data.email ?? data.userEmail ?? data.user_email;
+  const userId = data.account?.userId ?? data.account?.user_id ?? data.userId ?? data.user_id;
+  if (email === undefined && userId === undefined) return null;
+  return Object.fromEntries(
+    Object.entries({
+      email,
+      userId,
+    }).filter(([, value]) => value !== undefined && value !== null),
+  );
 }
 
 async function handleModels(command, deps) {
