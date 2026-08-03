@@ -761,12 +761,13 @@ async function handleUtility(command, deps) {
   };
   if (command.group === "credits") return getCredits(options);
 
-  const status = await getStatus(options);
+  const status = sanitizeStatusResponse(await getStatus(options));
   const account = effectiveAccountForStatus({ command, saved, apiKey });
   if (!account || !status || typeof status !== "object" || Array.isArray(status) || status.account !== undefined) {
-    return status;
+    return command.options.json ? status : extractStatusDisplayFields(status);
   }
-  return { ...status, account };
+  const mergedStatus = { ...status, account };
+  return command.options.json ? mergedStatus : extractStatusDisplayFields(mergedStatus);
 }
 
 function effectiveAccountForStatus({ command, saved, apiKey }) {
@@ -778,14 +779,36 @@ function effectiveAccountForStatus({ command, saved, apiKey }) {
 function accountFromAuthData(data) {
   if (!data || typeof data !== "object") return null;
   const email = data.account?.email ?? data.email ?? data.userEmail ?? data.user_email;
-  const userId = data.account?.userId ?? data.account?.user_id ?? data.userId ?? data.user_id;
-  if (email === undefined && userId === undefined) return null;
+  const name = data.account?.name ?? data.name;
+  if (email === undefined && name === undefined) return null;
   return Object.fromEntries(
     Object.entries({
       email,
-      userId,
+      name,
     }).filter(([, value]) => value !== undefined && value !== null),
   );
+}
+
+function sanitizeStatusResponse(status) {
+  if (!status || typeof status !== "object") return status;
+  if (Array.isArray(status)) {
+    return status.map((entry) => sanitizeStatusResponse(entry));
+  }
+  return Object.fromEntries(
+    Object.entries(status)
+      .filter(([key]) => !["userId", "user_id"].includes(key))
+      .map(([key, value]) => [key, sanitizeStatusResponse(value)]),
+  );
+}
+
+function extractStatusDisplayFields(status) {
+  if (!status || typeof status !== "object") return status;
+  const email = status.email ?? status.account?.email ?? status.user?.email;
+  const name = status.name ?? status.account?.name ?? status.user?.name;
+  const result = {};
+  if (email !== undefined) result.email = email;
+  if (name !== undefined) result.name = name;
+  return result;
 }
 
 async function handleModels(command, deps) {

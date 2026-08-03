@@ -399,7 +399,7 @@ test("status includes effective saved account", async () => {
   const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
   await writeAuthConfig({
     apiKey: "sk-saved",
-    auth: { userId: 7, tokenId: 9, account: { email: "user@example.com", userId: 7 } },
+    auth: { userId: 7, tokenId: 9, account: { email: "user@example.com", name: "Test User", userId: 7 } },
     configDir,
   });
 
@@ -415,7 +415,7 @@ test("status includes effective saved account", async () => {
 
   assert.deepEqual(status, {
     status: "ok",
-    account: { email: "user@example.com", userId: 7 },
+    account: { email: "user@example.com", name: "Test User" },
   });
 });
 

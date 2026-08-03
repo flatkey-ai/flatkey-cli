@@ -34,7 +34,7 @@ test("runs generation and utility commands in json mode", async (t) => {
         response.end(JSON.stringify({ remaining: 42, used: 8 }));
       } else if (request.url === "/v1/status") {
         response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify({ status: "ok" }));
+        response.end(JSON.stringify({ status: "ok", email: "test@example.com", name: "Test User" }));
       } else if (request.url === "/v1/available_models") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({
@@ -73,6 +73,10 @@ test("runs generation and utility commands in json mode", async (t) => {
   assert.equal(JSON.parse(text.stdout).text, "headline");
   assert.equal(JSON.parse(credits.stdout).remaining, 42);
   assert.equal(JSON.parse(status.stdout).status, "ok");
+  assert.equal(JSON.parse(status.stdout).email, "test@example.com");
+  assert.equal(JSON.parse(status.stdout).name, "Test User");
+  assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(status.stdout), "user_id"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(status.stdout), "userId"), false);
   assert.deepEqual(JSON.parse(models.stdout).models, [
     { id: "remote-image", type: "image", source: "remote" },
   ]);
@@ -94,7 +98,7 @@ test("formats command output as human text by default", async (t) => {
       } else if (request.url === "/v1/credits") {
         response.end(JSON.stringify({ remaining: 8, used: 92 }));
       } else if (request.url === "/v1/status") {
-        response.end(JSON.stringify({ status: "ok", remaining: 42 }));
+        response.end(JSON.stringify({ status: "ok", remaining: 42, email: "test@example.com", name: "Test User" }));
       } else if (request.url === "/v1/video/generations") {
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/video.mp4" }] }));
       } else {
@@ -120,8 +124,12 @@ test("formats command output as human text by default", async (t) => {
   assert.match(credits.stdout, /Remaining: 8/);
   assert.match(credits.stdout, /Low credit warning: remaining credits are 8\. Top up soon\./);
   assert.doesNotMatch(credits.stdout, /^\{/);
-  assert.match(status.stdout, /Status: ok/);
-  assert.match(status.stdout, /Remaining: 42/);
+  assert.match(status.stdout, /Email: test@example.com/);
+  assert.match(status.stdout, /Name: Test User/);
+  assert.doesNotMatch(status.stdout, /Status: ok/);
+  assert.doesNotMatch(status.stdout, /Remaining: 42/);
+  assert.doesNotMatch(status.stdout, /user_id/);
+  assert.doesNotMatch(status.stdout, /userId/);
   assert.doesNotMatch(status.stdout, /Low credit warning/);
   assert.doesNotMatch(status.stdout, /^\{/);
   assert.match(video.stdout, /Video generated:/);
