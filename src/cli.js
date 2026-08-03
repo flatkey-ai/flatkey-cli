@@ -267,6 +267,7 @@ async function handleLogin(command, deps) {
     });
     const pollData = poll?.data ?? poll;
     if (pollData?.status === "approved") {
+      const account = accountFromAuthData(pollData);
       if (!pollData.api_key) {
         const saved = await readConfig(deps.configDir);
         if (typeof saved?.apiKey === "string" && saved.apiKey.trim() !== "") {
@@ -276,7 +277,7 @@ async function handleLogin(command, deps) {
               deviceId,
               userId: pollData.user_id ?? saved.auth?.userId,
               tokenId: pollData.token_id ?? saved.auth?.tokenId,
-              account: accountFromAuthData(pollData) ?? saved.auth?.account,
+              account: account ?? saved.auth?.account,
               loginAt: Math.floor(Date.now() / 1000),
             },
             configDir: deps.configDir,
@@ -285,9 +286,7 @@ async function handleLogin(command, deps) {
             ? {
               success: true,
               configPath,
-              tokenId: pollData.token_id ?? saved.auth?.tokenId,
-              userId: pollData.user_id ?? saved.auth?.userId,
-              account: accountFromAuthData(pollData) ?? saved.auth?.account,
+              account: stripDisplayOnlyIds(account ?? saved.auth?.account),
               reusedConfig: true,
             }
             : `Flatkey CLI already authorized. Saved config: ${configPath}`;
@@ -300,7 +299,7 @@ async function handleLogin(command, deps) {
           deviceId,
           userId: pollData.user_id,
           tokenId: pollData.token_id,
-          account: accountFromAuthData(pollData),
+          account,
           loginAt: Math.floor(Date.now() / 1000),
         },
         configDir: deps.configDir,
@@ -309,9 +308,7 @@ async function handleLogin(command, deps) {
         ? {
           success: true,
           configPath,
-          tokenId: pollData.token_id,
-          userId: pollData.user_id,
-          account: accountFromAuthData(pollData),
+          account: stripDisplayOnlyIds(account),
         }
         : `Flatkey CLI authorized. Saved config: ${configPath}`;
     }
@@ -766,7 +763,7 @@ async function handleUtility(command, deps) {
   if (!account || !status || typeof status !== "object" || Array.isArray(status) || status.account !== undefined) {
     return command.options.json ? status : extractStatusDisplayFields(status);
   }
-  const mergedStatus = { ...status, account };
+  const mergedStatus = sanitizeStatusResponse({ ...status, account });
   return command.options.json ? mergedStatus : extractStatusDisplayFields(mergedStatus);
 }
 
@@ -780,11 +777,13 @@ function accountFromAuthData(data) {
   if (!data || typeof data !== "object") return null;
   const email = data.account?.email ?? data.email ?? data.userEmail ?? data.user_email;
   const name = data.account?.name ?? data.name;
-  if (email === undefined && name === undefined) return null;
+  const userId = data.account?.userId ?? data.account?.user_id ?? data.userId ?? data.user_id;
+  if (email === undefined && name === undefined && userId === undefined) return null;
   return Object.fromEntries(
     Object.entries({
       email,
       name,
+      userId,
     }).filter(([, value]) => value !== undefined && value !== null),
   );
 }
@@ -798,6 +797,18 @@ function sanitizeStatusResponse(status) {
     Object.entries(status)
       .filter(([key]) => !["userId", "user_id"].includes(key))
       .map(([key, value]) => [key, sanitizeStatusResponse(value)]),
+  );
+}
+
+function stripDisplayOnlyIds(value) {
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripDisplayOnlyIds(entry));
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !["userId", "user_id", "tokenId", "token_id"].includes(key))
+      .map(([key, nested]) => [key, stripDisplayOnlyIds(nested)]),
   );
 }
 

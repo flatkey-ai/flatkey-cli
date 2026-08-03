@@ -351,9 +351,9 @@ test("browser login reuses saved config when approved authorization is already c
 
   assert.equal(result.success, true);
   assert.equal(result.reusedConfig, true);
-  assert.equal(result.tokenId, 9);
-  assert.equal(result.userId, 7);
-  assert.deepEqual(result.account, { email: "user@example.com", userId: 7 });
+  assert.deepEqual(result.account, { email: "user@example.com" });
+  assert.equal(Object.prototype.hasOwnProperty.call(result, "tokenId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, "userId"), false);
 
   const saved = JSON.parse(await readFile(join(configDir, "config.json"), "utf8"));
   assert.equal(saved.apiKey, "sk-saved");
