@@ -12,3 +12,4 @@
 - 回归结果：
   - 执行 `npm test`
   - `pass 93 / fail 0 / skip 9`（共 102）
+- Bumped package version to `0.1.25` in `package.json`.
