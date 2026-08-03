@@ -25,13 +25,38 @@ flatkey -v
 
 ## Auth
 
-Use `FLATKEY_API_KEY`:
+Recommended: sign in through the Flatkey console:
+
+```bash
+flatkey login
+```
+
+`flatkey login` opens the Flatkey console authorization page, waits for approval, then saves the CLI API key and account metadata locally. After login, check the active auth state:
+
+```bash
+flatkey auth status
+flatkey status --json
+```
+
+If your terminal cannot open a browser automatically, print the approval URL and open it yourself:
+
+```bash
+flatkey login --no-open
+```
+
+Remove the saved API key:
+
+```bash
+flatkey logout
+```
+
+Alternative: use `FLATKEY_API_KEY`:
 
 ```bash
 export FLATKEY_API_KEY=<your-flatkey-api-key>
 ```
 
-Or save it locally:
+Or save a manually created key locally:
 
 ```bash
 flatkey onboard --api-key <key>
@@ -131,7 +156,7 @@ Give this to an AI agent:
 Use Flatkey CLI for media generation.
 
 Install: npm install -g @flatkey-ai/cli
-Auth: use FLATKEY_API_KEY.
+Auth: prefer flatkey login; FLATKEY_API_KEY also works.
 
 Rules:
 1. Use --json for machine-readable output.

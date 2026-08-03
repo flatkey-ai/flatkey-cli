@@ -13,7 +13,7 @@ Website: [flatkey.ai](https://flatkey.ai/?utm_source=github&utm_medium=readme&ut
 
 ```bash
 npm install -g @flatkey-ai/cli
-export FLATKEY_API_KEY=<your-flatkey-api-key>
+flatkey login
 
 flatkey image generate --prompt "editorial cover, neon city at dawn" -o cover.png
 flatkey video generate --prompt "cinematic product launch clip" --model seedance2 -o launch.mp4
@@ -67,13 +67,44 @@ flatkey -v
 
 ## Auth
 
-Use an environment variable:
+Recommended: sign in through the Flatkey console:
+
+```bash
+flatkey login
+```
+
+`flatkey login` opens a browser authorization page, waits for approval, then saves the CLI API key and account metadata in your local Flatkey config. After login, check the active auth state:
+
+```bash
+flatkey auth status
+flatkey status --json
+```
+
+If your terminal cannot open a browser automatically, print the approval URL and open it yourself:
+
+```bash
+flatkey login --no-open
+```
+
+For staging or self-hosted console testing:
+
+```bash
+flatkey login --console-url https://console.flatkey.ai
+```
+
+To remove the saved API key:
+
+```bash
+flatkey logout
+```
+
+Alternative: use an environment variable:
 
 ```bash
 export FLATKEY_API_KEY=<key>
 ```
 
-Or save it locally:
+Or save a manually created key locally:
 
 ```bash
 flatkey onboard --api-key <key>

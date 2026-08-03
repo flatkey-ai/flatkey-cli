@@ -25,13 +25,38 @@ flatkey -v
 
 ## 鉴权
 
-推荐用环境变量：
+推荐用浏览器登录：
+
+```bash
+flatkey login
+```
+
+`flatkey login` 会打开 Flatkey 控制台授权页，授权成功后把 CLI API key 和账号信息保存到本地配置。登录后可以检查当前生效的鉴权状态：
+
+```bash
+flatkey auth status
+flatkey status --json
+```
+
+如果终端不能自动打开浏览器，可以只打印授权链接，手动复制打开：
+
+```bash
+flatkey login --no-open
+```
+
+退出登录并移除本地保存的 API key：
+
+```bash
+flatkey logout
+```
+
+也可以用环境变量：
 
 ```bash
 export FLATKEY_API_KEY=<your-flatkey-api-key>
 ```
 
-也可以保存到本地配置：
+或手动创建 key 后保存到本地配置：
 
 ```bash
 flatkey onboard --api-key <key>
@@ -131,7 +156,7 @@ flatkey help --ai
 你可以用 Flatkey CLI 做媒体生成。
 
 安装：npm install -g @flatkey-ai/cli
-鉴权：使用环境变量 FLATKEY_API_KEY。
+鉴权：优先运行 flatkey login；也可以使用环境变量 FLATKEY_API_KEY。
 
 规则：
 1. 需要机器可读输出时，命令加 --json。
