@@ -1,5 +1,12 @@
 # Agent Log
 
+## Release
+
+- 后续发布直接执行根目录脚本：`./release.sh`
+- 默认 patch bump；也可用 `./release.sh minor`、`./release.sh major` 或 `./release.sh 0.3.0`
+- 脚本会 bump `package.json`、跑 `npm test`、commit、tag、push，并 watch npm publish workflow
+- 有未提交改动时会先列出并要求确认；自动确认用 `--yes`
+
 - 目标：修复测试并按要求不展示用户/令牌 ID。
 - 修改文件：
   - `src/cli.js`
