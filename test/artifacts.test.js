@@ -47,6 +47,18 @@ test("preserves remote url artifacts without downloading", async () => {
   assert.deepEqual(artifacts, [{ url: "https://cdn.test/audio.mp3" }]);
 });
 
+test("preserves temp_url artifacts without downloading", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
+
+  const artifacts = await persistArtifacts({
+    kind: "audio",
+    response: { data: [{ temp_url: "https://cdn.test/audio-temp.mp3" }] },
+    outDir,
+  });
+
+  assert.deepEqual(artifacts, [{ url: "https://cdn.test/audio-temp.mp3" }]);
+});
+
 test("saves first artifact to explicit output path", async () => {
   const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
   const output = join(outDir, "custom.png");
@@ -118,6 +130,32 @@ test("downloads remote url artifact when explicit output path is set", async () 
   });
 
   assert.deepEqual(calls, ["https://cdn.test/clip.mp4"]);
+  assert.deepEqual(artifacts, [{ path: output }]);
+  assert.equal(await readFile(output, "utf8"), "video-bytes");
+});
+
+test("downloads temp_url artifact when explicit output path is set", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
+  const output = join(outDir, "clip.mp4");
+  const calls = [];
+
+  const artifacts = await persistArtifacts({
+    kind: "video",
+    response: { data: [{ temp_url: "https://cdn.test/temp-clip.mp4" }] },
+    output,
+    fetch: async (url) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        async arrayBuffer() {
+          return Buffer.from("video-bytes");
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(calls, ["https://cdn.test/temp-clip.mp4"]);
   assert.deepEqual(artifacts, [{ path: output }]);
   assert.equal(await readFile(output, "utf8"), "video-bytes");
 });

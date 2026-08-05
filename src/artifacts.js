@@ -47,7 +47,7 @@ function expandHomePath(path) {
 }
 
 async function persistItem({ kind, item, outDir, output, index, fetchImpl }) {
-  const dataUrl = getString(item, ["url", "video_url", "data_url", "dataUrl"]);
+  const dataUrl = getString(item, ["url", "video_url", "data_url", "dataUrl", "temp_url"]);
   if (dataUrl?.startsWith("data:")) {
     const parsed = parseDataUrl(dataUrl);
     const path = artifactPath({ kind, outDir, output, index, extension: parsed.extension });
@@ -94,6 +94,8 @@ function extractItems(response) {
   if (Array.isArray(response?.candidates)) {
     return response.candidates.flatMap((candidate) => candidate.content?.parts ?? []);
   }
+  if (typeof response?.temp_url === "string") return [{ url: response.temp_url }];
+  if (typeof response?.metadata?.temp_url === "string") return [{ url: response.metadata.temp_url }];
   if (typeof response?.metadata?.url === "string") return [{ url: response.metadata.url }];
   if (typeof response?.url === "string") return [response];
   if (typeof response?.video_url?.url === "string") return [{ url: response.video_url.url }];

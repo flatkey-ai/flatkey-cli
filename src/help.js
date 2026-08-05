@@ -67,6 +67,7 @@ Commands:
 Global options:
   --json                         Print machine-readable JSON
   --output, -o <file>             Write generated output to a local file
+  --verbose                      Print request/response logs to stderr
   --base-url <url>               Override Flatkey router URL
 
 Environment:

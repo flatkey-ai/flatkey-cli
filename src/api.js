@@ -29,12 +29,16 @@ export async function uploadTempMediaImage(options) {
 export function planImageRequest(options) {
   const model = options.model ?? "nano-banana-pro-preview";
   if (model.startsWith("gpt")) {
+    const responseFormat = options.response_format ?? options.responseFormat ?? "url";
+    const tempUrl = options.temp_url ?? options.tempUrl;
     return planJsonPost(options, "/v1/images/generations", cleanObject({
       model,
       prompt: options.prompt,
       size: options.size,
       n: parseOptionalInteger(options.n),
       quality: options.quality,
+      response_format: responseFormat,
+      temp_url: tempUrl ?? true,
     }));
   }
 
@@ -47,6 +51,7 @@ export function planImageRequest(options) {
     },
     body: {
       contents: [{ parts: [{ text: options.prompt }] }],
+      temp_url: true,
     },
   });
 }
@@ -88,6 +93,7 @@ export function planVideoRequest(options) {
     resolution,
     quality: resolution,
     fps: parseOptionalInteger(options.fps),
+    temp_url: true,
     images: !isSeedanceModel(model) && imageUrls.length > 0 ? imageUrls : undefined,
   });
   const seedanceContent = buildSeedanceContent(options);
@@ -232,7 +238,7 @@ function planRequest(options, path, init = {}) {
 
 async function requestJsonFromPlan(options, plan) {
   const fetchImpl = options.fetch ?? fetch;
-  const response = await fetchImpl(plan.url, {
+  const request = {
     method: plan.method,
     headers: plan.headers,
     body: plan.body === undefined
@@ -240,8 +246,12 @@ async function requestJsonFromPlan(options, plan) {
       : isFormData(plan.body)
         ? plan.body
         : JSON.stringify(plan.body),
-  });
+  };
+  logRequest(options, plan.url, request);
+  const response = await fetchImpl(plan.url, request);
+  logResponse(options, response);
   const body = await readJson(response);
+  logResponseBody(options, body);
   if (!response.ok || body?.success === false) {
     throw new FlatkeyError(extractErrorMessage(body, response.status), {
       status: response.status,
@@ -256,13 +266,17 @@ function isFormData(value) {
 
 async function requestBinaryArtifactFromPlan(options, plan) {
   const fetchImpl = options.fetch ?? fetch;
-  const response = await fetchImpl(plan.url, {
+  const request = {
     method: plan.method,
     headers: plan.headers,
     body: plan.body === undefined ? undefined : JSON.stringify(plan.body),
-  });
+  };
+  logRequest(options, plan.url, request);
+  const response = await fetchImpl(plan.url, request);
+  logResponse(options, response);
   if (!response.ok) {
     const body = await readJson(response);
+    logResponseBody(options, body);
     throw new FlatkeyError(extractErrorMessage(body, response.status), {
       status: response.status,
     });
@@ -270,6 +284,43 @@ async function requestBinaryArtifactFromPlan(options, plan) {
   return {
     data: [{ data: Buffer.from(await response.arrayBuffer()).toString("base64") }],
   };
+}
+
+function logRequest(options, url, request) {
+  if (!options?.verbose) return;
+  const safeHeaders = redactHeaders(request.headers);
+  const safeBody = request.body === undefined
+    ? undefined
+    : isFormData(request.body)
+      ? "<form-data>"
+      : request.body;
+  options.verboseLog?.(`-> ${request.method} ${url}`);
+  options.verboseLog?.(`headers: ${JSON.stringify(safeHeaders)}`);
+  if (safeBody !== undefined) {
+    options.verboseLog?.(`body: ${safeBody}`);
+  }
+}
+
+function logResponse(options, response) {
+  if (!options?.verbose) return;
+  options.verboseLog?.(`<- ${response.status} ${response.statusText || ""}`.trim());
+}
+
+function logResponseBody(options, body) {
+  if (!options?.verbose) return;
+  options.verboseLog?.(`response: ${truncateLogValue(JSON.stringify(body))}`);
+}
+
+function redactHeaders(headers) {
+  return Object.fromEntries(Object.entries(headers ?? {}).map(([key, value]) => [
+    key,
+    key.toLowerCase() === "authorization" ? "Bearer <redacted>" : `${value}`,
+  ]));
+}
+
+function truncateLogValue(value) {
+  if (value === undefined) return "";
+  return value.length > 1200 ? `${value.slice(0, 1200)}…` : value;
 }
 
 async function requestJson(options, path, init = {}) {

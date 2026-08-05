@@ -15,7 +15,7 @@ const COMMANDS = new Set([
 ]);
 
 const GROUP_ACTIONS = new Set(["audio", "auth", "image", "text", "video"]);
-const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "console_url", "dry_run", "help", "json", "output", "out"]);
+const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "console_url", "dry_run", "help", "json", "output", "out", "verbose"]);
 const REPEATABLE_OPTIONS = new Set(["image", "image_url", "video_url"]);
 const COMMAND_OPTIONS = {
   "audio generate": new Set(["model", "prompt", "similarity_boost", "stability", "style", "voice_id"]),
@@ -187,7 +187,7 @@ export async function runCommand(command, deps = {}) {
   }
 
   if (command.group === "models") {
-    return handleModels(command, deps);
+    return handleModels(command, { ...deps, stdout, stderr });
   }
 
   if (command.group === "login") {
@@ -206,12 +206,12 @@ export async function runCommand(command, deps = {}) {
   }
 
   if (command.group === "credits" || command.group === "status") {
-    return handleUtility(command, deps);
+    return handleUtility(command, { ...deps, stdout, stderr });
   }
 
   if (["image", "video", "audio", "text"].includes(command.group)) {
     if (command.group === "audio" && command.action === "voices") {
-      return handleVoices(command, deps);
+      return handleVoices(command, { ...deps, stdout, stderr });
     }
     const validAction = command.group === "audio"
       ? ["generate", "sfx", "music"].includes(command.action)
@@ -222,7 +222,7 @@ export async function runCommand(command, deps = {}) {
       throw new Error(`Unknown action for ${command.group}: ${command.action}`);
     }
     if (command.group === "image" && command.action === "upload") {
-      return handleImageUpload(command, deps);
+      return handleImageUpload(command, { ...deps, stdout, stderr });
     }
     return handleGenerate(command, { ...deps, stdout, stderr });
   }
@@ -236,12 +236,17 @@ async function handleLogin(command, deps) {
   const deviceId = await ensureDeviceId({ configDir: deps.configDir });
   const version = await readPackageVersion();
   const consoleOrigin = firstNonEmpty(command.options.console_url, DEFAULT_CONSOLE_URL);
-  const authorization = await createDeviceAuthorization({
+  const requestOptions = {
     consoleUrl: consoleOrigin,
+    fetch: deps.fetch,
+    verbose: command.options.verbose,
+    verboseLog: verboseLogger(deps.stderr, command.options.verbose),
+  };
+  const authorization = await createDeviceAuthorization({
     deviceId,
     clientName: "flatkey-cli",
     clientVersion: version,
-    fetch: deps.fetch,
+    ...requestOptions,
   });
   const data = authorization?.data ?? authorization;
   if (!data?.device_code || !data?.verification_uri_complete) {
@@ -261,9 +266,8 @@ async function handleLogin(command, deps) {
   while (Date.now() < deadline) {
     await delay(nextLoginPollDelay(startedAt, initialIntervalMs), deps);
     const poll = await pollDeviceAuthorization({
-      consoleUrl: consoleOrigin,
       deviceCode: data.device_code,
-      fetch: deps.fetch,
+      ...requestOptions,
     });
     const pollData = poll?.data ?? poll;
     if (pollData?.status === "approved") {
@@ -432,6 +436,8 @@ async function handleImageUpload(command, deps) {
     filename: basename(file),
     contentType: imageContentTypeFromPath(file),
     fetch: deps.fetch,
+    verbose: command.options.verbose,
+    verboseLog: verboseLogger(deps.stderr, command.options.verbose),
   });
   const data = response?.data ?? response;
   const signedUrl = extractUploadedImageUrl(response);
@@ -494,6 +500,7 @@ async function handleGenerate(command, deps) {
     tempMediaBaseUrl: tempMediaBaseUrl ?? DEFAULT_CONSOLE_URL,
     env: deps.env ?? process.env,
     fetch: deps.fetch,
+    verboseLog: verboseLogger(deps.stderr, command.options.verbose),
   };
   if (command.group === "video" && !command.options.dry_run) {
     await uploadVideoLocalImages(options, { uploadTempMediaImage });
@@ -581,6 +588,8 @@ async function uploadLocalImage(file, options, deps) {
     filename: basename(file),
     contentType: imageContentTypeFromPath(file),
     fetch: options.fetch,
+    verbose: options.verbose,
+    verboseLog: options.verboseLog,
   });
   const url = extractUploadedImageUrl(response);
   if (!url) throw new Error(`Image upload failed: missing signed_url for ${file}`);
@@ -632,10 +641,12 @@ async function waitForVideoResult(response, options) {
 function hasArtifact(response) {
   return Boolean(
     response?.metadata?.url
+      || response?.metadata?.temp_url
       || response?.url
+      || response?.temp_url
       || response?.video_url?.url
-      || response?.data?.some?.((item) => item?.url || item?.b64_json || item?.base64 || item?.data)
-      || response?.artifacts?.some?.((item) => item?.url || item?.path)
+      || response?.data?.some?.((item) => item?.url || item?.temp_url || item?.b64_json || item?.base64 || item?.data)
+      || response?.artifacts?.some?.((item) => item?.url || item?.temp_url || item?.path)
       || response?.content?.some?.((item) => item?.url || item?.video_url?.url || item?.data_url || item?.b64_json || item?.base64 || item?.data),
   );
 }
@@ -696,6 +707,8 @@ async function handleVoices(command, deps) {
     apiKey,
     baseUrl: routerOrigin,
     fetch: deps.fetch,
+    verbose: command.options.verbose,
+    verboseLog: verboseLogger(deps.stderr, command.options.verbose),
   });
 }
 
@@ -755,6 +768,8 @@ async function handleUtility(command, deps) {
     apiKey,
     baseUrl: consoleOrigin,
     fetch: deps.fetch,
+    verbose: command.options.verbose,
+    verboseLog: verboseLogger(deps.stderr, command.options.verbose),
   };
   if (command.group === "credits") return getCredits(options);
 
@@ -841,8 +856,19 @@ async function handleModels(command, deps) {
     apiKey,
     baseUrl: consoleOrigin,
     fetch: deps.fetch,
+    verbose: command.options.verbose,
+    verboseLog: verboseLogger(deps.stderr, command.options.verbose),
   });
   return { models: normalizeModels(response, command.options.type) };
+}
+
+function verboseLogger(stream, enabled) {
+  if (!enabled) return () => {};
+  return (line) => {
+    if (typeof line === "string") {
+      stream?.write?.(`${line}\n`);
+    }
+  };
 }
 
 function formatHuman(result) {

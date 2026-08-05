@@ -58,6 +58,7 @@ test("builds nano image request using gemini-style route", async () => {
   assert.equal(calls[0].init.headers["x-goog-api-key"], "key");
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     contents: [{ parts: [{ text: "poster" }] }],
+    temp_url: true,
   });
 });
 
@@ -81,6 +82,8 @@ test("builds OpenAI image request for gpt image models", async () => {
     prompt: "cover",
     size: "1024x1024",
     n: 2,
+    response_format: "url",
+    temp_url: true,
   });
 });
 
@@ -130,6 +133,7 @@ test("builds video generation request", async () => {
     resolution: "720p",
     quality: "720p",
     fps: 24,
+    temp_url: true,
   });
 });
 
@@ -145,6 +149,7 @@ test("video request keeps aspect alias for ratio", () => {
     content: [{ type: "text", text: "walkthrough" }],
     aspect: "9:16",
     ratio: "9:16",
+    temp_url: true,
   });
 });
 
@@ -183,6 +188,7 @@ test("builds seedance2 video generation request", async () => {
     model: "seedance2",
     prompt: "newsroom b-roll",
     content: [{ type: "text", text: "newsroom b-roll" }],
+    temp_url: true,
   });
 });
 
@@ -197,6 +203,7 @@ test("builds seedance video request with official content payload", () => {
     model: "Seedance2.0-pro",
     prompt: "小猫睡觉",
     content: [{ type: "text", text: "小猫睡觉" }],
+    temp_url: true,
   });
 });
 
@@ -221,6 +228,7 @@ test("builds seedance video request with reference media content", () => {
       { type: "image_url", image_url: { url: "https://example.com/last.png" }, role: "last_frame" },
       { type: "video_url", video_url: { url: "https://example.com/ref.mp4" }, role: "reference_video" },
     ],
+    temp_url: true,
   });
 });
 
@@ -235,6 +243,7 @@ test("passes image references to generic video request images", () => {
     model: "veo-3",
     prompt: "walkthrough",
     images: ["https://example.com/a.png"],
+    temp_url: true,
   });
 });
 
