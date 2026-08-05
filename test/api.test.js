@@ -56,6 +56,7 @@ test("builds nano image request using gemini-style route", async () => {
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.Authorization, "Bearer key");
   assert.equal(calls[0].init.headers["x-goog-api-key"], "key");
+  assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     contents: [{ parts: [{ text: "poster" }] }],
     temp_url: true,
@@ -77,6 +78,7 @@ test("builds OpenAI image request for gpt image models", async () => {
 
   assert.equal(calls[0].url, "https://router.test/v1/images/generations");
   assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+  assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     model: "gpt-image-2",
     prompt: "cover",
@@ -104,6 +106,7 @@ test("uploads temporary media image with multipart file", async () => {
   assert.equal(calls[0].url, "https://router.test/v1/temp-media/images");
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+  assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.equal(calls[0].init.headers["content-type"], undefined);
   assert.equal(calls[0].init.body instanceof FormData, true);
 });
@@ -342,7 +345,9 @@ test("builds credits, status, and models requests", async () => {
   assert.equal(calls[1].url, "https://router.test/v1/status");
   assert.equal(calls[2].url, "https://router.test/v1/available_models");
   assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+  assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.equal(calls[2].init.headers.Authorization, "Bearer key");
+  assert.equal(calls[2].init.headers["x-flatkey-client"], "cli");
 });
 
 test("credits and status default to console origin", async () => {
@@ -374,12 +379,14 @@ test("creates and polls CLI device authorization on console API", async () => {
 
   assert.equal(calls[0].url, "https://console.test/api/cli/device_authorizations");
   assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     client_name: "flatkey-cli",
     client_version: "0.1.6",
     device_id: "device-1",
   });
   assert.equal(calls[1].url, "https://console.test/api/cli/device_authorizations/token");
+  assert.equal(calls[1].init.headers["x-flatkey-client"], "cli");
   assert.deepEqual(JSON.parse(calls[1].init.body), {
     device_code: "device-code",
   });

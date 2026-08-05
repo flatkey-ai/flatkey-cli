@@ -1,3 +1,5 @@
+import { withCliRequestHeaders } from "./requestHeaders.js";
+
 export const DEFAULT_BASE_URL = "https://router.flatkey.ai";
 export const DEFAULT_MODELS_BASE_URL = "https://console.flatkey.ai";
 export const DEFAULT_CONSOLE_URL = "https://console.flatkey.ai";
@@ -231,7 +233,7 @@ function planRequest(options, path, init = {}) {
   return {
     url: buildUrl(options.baseUrl, path),
     method: init.method ?? "GET",
-    headers: init.headers ?? authHeaders(options.apiKey),
+    headers: withCliRequestHeaders(init.headers ?? authHeaders(options.apiKey)),
     body: init.body,
   };
 }

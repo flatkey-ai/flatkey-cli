@@ -1051,9 +1051,11 @@ async function maybeWriteUpdateNotice(command, deps = {}) {
 }
 
 async function fetchLatestPackageVersion(deps = {}) {
+  const { CLI_REQUEST_HEADERS } = await import("./requestHeaders.js");
   const fetchImpl = deps.fetch ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") return undefined;
   const response = await fetchImpl("https://registry.npmjs.org/@flatkey-ai%2fcli/latest", {
+    headers: CLI_REQUEST_HEADERS,
     signal: typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
       ? AbortSignal.timeout(750)
       : undefined,

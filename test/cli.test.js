@@ -748,14 +748,15 @@ test("main warns on stderr when a newer npm version is available", async () => {
   await main(["image", "generate", "--prompt", "poster", "--dry-run"], {
     stdout: { write: (chunk) => { stdout += chunk; } },
     stderr: { write: (chunk) => { stderr += chunk; } },
-    fetch: async (url) => {
-      calls.push(url);
+    fetch: async (url, init) => {
+      calls.push({ url, init });
       return jsonResponse({ version: "99.0.0" });
     },
   });
 
   assert.match(stdout, /https:\/\/router\.flatkey\.ai\/v1beta\/models\/nano-banana-pro-preview:generateContent/);
-  assert.equal(calls[0], "https://registry.npmjs.org/@flatkey-ai%2fcli/latest");
+  assert.equal(calls[0].url, "https://registry.npmjs.org/@flatkey-ai%2fcli/latest");
+  assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.match(stderr, new RegExp(`Flatkey CLI update available: ${pkg.version.replaceAll(".", "\\.")} -> 99\\.0\\.0`));
   assert.match(stderr, /npm install -g @flatkey-ai\/cli/);
 });

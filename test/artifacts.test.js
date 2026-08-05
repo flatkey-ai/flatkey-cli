@@ -117,8 +117,8 @@ test("downloads remote url artifact when explicit output path is set", async () 
     kind: "video",
     response: { data: [{ url: "https://cdn.test/clip.mp4" }] },
     output,
-    fetch: async (url) => {
-      calls.push(url);
+    fetch: async (url, init) => {
+      calls.push({ url, init });
       return {
         ok: true,
         status: 200,
@@ -129,7 +129,8 @@ test("downloads remote url artifact when explicit output path is set", async () 
     },
   });
 
-  assert.deepEqual(calls, ["https://cdn.test/clip.mp4"]);
+  assert.equal(calls[0].url, "https://cdn.test/clip.mp4");
+  assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.deepEqual(artifacts, [{ path: output }]);
   assert.equal(await readFile(output, "utf8"), "video-bytes");
 });

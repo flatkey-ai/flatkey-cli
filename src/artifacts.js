@@ -2,6 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
 
+import { CLI_REQUEST_HEADERS } from "./requestHeaders.js";
+
 const DEFAULT_EXTENSIONS = {
   audio: "mp3",
   image: "png",
@@ -80,7 +82,7 @@ async function persistItem({ kind, item, outDir, output, index, fetchImpl }) {
 }
 
 async function downloadArtifact({ url, path, fetchImpl }) {
-  const response = await fetchImpl(url);
+  const response = await fetchImpl(url, { headers: CLI_REQUEST_HEADERS });
   if (!response.ok) {
     throw new Error(`Failed to download artifact ${url}: HTTP ${response.status}`);
   }
