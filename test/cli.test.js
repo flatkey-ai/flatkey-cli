@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { parseArgv, runCommand } from "../src/cli.js";
+import { main, parseArgv, runCommand } from "../src/cli.js";
 import { writeAuthConfig, writeConfig } from "../src/config.js";
 
 test("parses image generation with prompt and json mode", () => {
@@ -737,6 +737,41 @@ test("version command matches package version", async () => {
   assert.deepEqual(await runCommand({ group: "version", options: { json: true } }), {
     version: pkg.version,
   });
+});
+
+test("main warns on stderr when a newer npm version is available", async () => {
+  const pkg = JSON.parse(await readFile("package.json", "utf8"));
+  let stdout = "";
+  let stderr = "";
+  const calls = [];
+
+  await main(["image", "generate", "--prompt", "poster", "--dry-run"], {
+    stdout: { write: (chunk) => { stdout += chunk; } },
+    stderr: { write: (chunk) => { stderr += chunk; } },
+    fetch: async (url) => {
+      calls.push(url);
+      return jsonResponse({ version: "99.0.0" });
+    },
+  });
+
+  assert.match(stdout, /https:\/\/router\.flatkey\.ai\/v1beta\/models\/nano-banana-pro-preview:generateContent/);
+  assert.equal(calls[0], "https://registry.npmjs.org/@flatkey-ai%2fcli/latest");
+  assert.match(stderr, new RegExp(`Flatkey CLI update available: ${pkg.version.replaceAll(".", "\\.")} -> 99\\.0\\.0`));
+  assert.match(stderr, /npm install -g @flatkey-ai\/cli/);
+});
+
+test("main skips update warning for json output", async () => {
+  let stdout = "";
+  let stderr = "";
+
+  await main(["image", "generate", "--prompt", "poster", "--dry-run", "--json"], {
+    stdout: { write: (chunk) => { stdout += chunk; } },
+    stderr: { write: (chunk) => { stderr += chunk; } },
+    fetch: async () => jsonResponse({ version: "99.0.0" }),
+  });
+
+  assert.doesNotThrow(() => JSON.parse(stdout));
+  assert.equal(stderr, "");
 });
 
 function jsonResponse(body, status = 200) {

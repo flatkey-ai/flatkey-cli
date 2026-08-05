@@ -146,26 +146,30 @@ function validateCommandOptions(command) {
   return command;
 }
 
-export async function main(argv) {
+export async function main(argv, deps = {}) {
+  const stdout = deps.stdout ?? process.stdout;
+  const stderr = deps.stderr ?? process.stderr;
   const command = parseArgv(argv);
   if (command.options.help) {
-    const result = await runCommand(command);
-    process.stdout.write(`${formatHuman(result)}\n`);
+    const result = await runCommand(command, { ...deps, stdout, stderr });
+    stdout.write(`${formatHuman(result)}\n`);
     return;
   }
   if (command.group === "onboard") {
     const { writeConfig } = await import("./config.js");
-    const configPath = await writeConfig({ apiKey: command.options.api_key });
-    process.stdout.write(`Saved Flatkey config: ${configPath}\n`);
+    const configPath = await writeConfig({ apiKey: command.options.api_key, configDir: deps.configDir });
+    stdout.write(`Saved Flatkey config: ${configPath}\n`);
+    await maybeWriteUpdateNotice(command, { ...deps, stderr });
     return;
   }
 
-  const result = await runCommand(command);
+  const result = await runCommand(command, { ...deps, stdout, stderr });
   if (result !== undefined) {
-    process.stdout.write(
+    stdout.write(
       command.options.json ? `${JSON.stringify(result)}\n` : `${formatHuman(result)}\n`,
     );
   }
+  await maybeWriteUpdateNotice(command, { ...deps, stderr });
 }
 
 export async function runCommand(command, deps = {}) {
@@ -1026,4 +1030,53 @@ async function readPackageVersion() {
   const { readFile } = await import("node:fs/promises");
   const packageUrl = new URL("../package.json", import.meta.url);
   return JSON.parse(await readFile(packageUrl, "utf8")).version;
+}
+
+async function maybeWriteUpdateNotice(command, deps = {}) {
+  if (command.options.json || command.options.help || command.group === "help" || command.group === "version") {
+    return;
+  }
+  try {
+    const current = await readPackageVersion();
+    const latest = await fetchLatestPackageVersion(deps);
+    if (!latest || compareVersions(latest, current) <= 0) return;
+    deps.stderr?.write?.([
+      `\nFlatkey CLI update available: ${current} -> ${latest}`,
+      "Upgrade: npm install -g @flatkey-ai/cli",
+      "",
+    ].join("\n"));
+  } catch {
+    // Update checks must never break normal CLI commands.
+  }
+}
+
+async function fetchLatestPackageVersion(deps = {}) {
+  const fetchImpl = deps.fetch ?? globalThis.fetch;
+  if (typeof fetchImpl !== "function") return undefined;
+  const response = await fetchImpl("https://registry.npmjs.org/@flatkey-ai%2fcli/latest", {
+    signal: typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(750)
+      : undefined,
+  });
+  if (!response?.ok) return undefined;
+  const body = await response.json();
+  return typeof body?.version === "string" ? body.version : undefined;
+}
+
+function compareVersions(left, right) {
+  const leftParts = parseVersionParts(left);
+  const rightParts = parseVersionParts(right);
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function parseVersionParts(version) {
+  return String(version)
+    .split("-", 1)[0]
+    .split(".")
+    .map((part) => Number.parseInt(part, 10))
+    .map((part) => Number.isFinite(part) ? part : 0);
 }
