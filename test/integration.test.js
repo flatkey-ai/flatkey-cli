@@ -22,7 +22,10 @@ test("runs generation and utility commands in json mode", async (t) => {
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/image.png" }] }));
       } else if (request.url === "/v1/video/generations") {
         response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify({ data: [{ url: "https://cdn.test/video.mp4" }] }));
+        response.end(JSON.stringify({ data: [{ url: `${baseUrl}/video.mp4` }] }));
+      } else if (request.url === "/video.mp4") {
+        response.setHeader("content-type", "video/mp4");
+        response.end("video-file");
       } else if (request.url === "/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL") {
         response.setHeader("content-type", "audio/mpeg");
         response.end("audio-file");
@@ -67,7 +70,8 @@ test("runs generation and utility commands in json mode", async (t) => {
   const voices = await runCli(["audio", "voices", ...common]);
 
   assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ url: "https://cdn.test/image.png" }]);
-  assert.deepEqual(JSON.parse(video.stdout).artifacts, [{ url: "https://cdn.test/video.mp4" }]);
+  assert.match(JSON.parse(video.stdout).artifacts[0].path, /video-01\.mp4$/);
+  assert.equal(await readFile(JSON.parse(video.stdout).artifacts[0].path, "utf8"), "video-file");
   assert.equal(JSON.parse(audio.stdout).artifacts.length, 1);
   assert.match(JSON.parse(audio.stdout).artifacts[0].path, /audio-01\.mp3$/);
   assert.equal(JSON.parse(text.stdout).text, "headline");
@@ -100,7 +104,10 @@ test("formats command output as human text by default", async (t) => {
       } else if (request.url === "/v1/status") {
         response.end(JSON.stringify({ status: "ok", remaining: 42, email: "test@example.com", name: "Test User" }));
       } else if (request.url === "/v1/video/generations") {
-        response.end(JSON.stringify({ data: [{ url: "https://cdn.test/video.mp4" }] }));
+        response.end(JSON.stringify({ data: [{ url: `${baseUrl}/video.mp4` }] }));
+      } else if (request.url === "/video.mp4") {
+        response.setHeader("content-type", "video/mp4");
+        response.end("video-file");
       } else {
         response.statusCode = 404;
         response.end(JSON.stringify({ error: { message: "not found" } }));
@@ -133,7 +140,7 @@ test("formats command output as human text by default", async (t) => {
   assert.doesNotMatch(status.stdout, /Low credit warning/);
   assert.doesNotMatch(status.stdout, /^\{/);
   assert.match(video.stdout, /Video generated:/);
-  assert.match(video.stdout, /URL: https:\/\/cdn\.test\/video\.mp4/);
+  assert.match(video.stdout, /Saved: .*video-01\.mp4/);
   assert.doesNotMatch(video.stdout, /^\{/);
 });
 

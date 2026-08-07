@@ -592,6 +592,7 @@ test("video generation uploads local image references before request", async () 
       image: [image],
       api_key: "key",
       base_url: "https://router.test",
+      out: dir,
       json: true,
     },
   }, {
@@ -599,6 +600,15 @@ test("video generation uploads local image references before request", async () 
       calls.push({ url, init });
       if (url.endsWith("/v1/temp-media/images")) {
         return jsonResponse({ success: true, data: { signed_url: "https://storage.test/ref.png" } });
+      }
+      if (url === "https://cdn.test/video.mp4") {
+        return {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return Buffer.from("video-bytes");
+          },
+        };
       }
       return jsonResponse({ data: [{ url: "https://cdn.test/video.mp4" }] });
     },
@@ -614,7 +624,45 @@ test("video generation uploads local image references before request", async () 
     { type: "text", text: "clip" },
     { type: "image_url", image_url: { url: "https://storage.test/ref.png" }, role: "reference_image" },
   ]);
-  assert.deepEqual(result.artifacts, [{ url: "https://cdn.test/video.mp4" }]);
+  assert.match(result.artifacts[0].path, /video-01\.mp4$/);
+  assert.equal(await readFile(result.artifacts[0].path, "utf8"), "video-bytes");
+});
+
+test("video generation saves remote result to default output directory", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-video-default-"));
+
+  const result = await runCommand({
+    group: "video",
+    action: "generate",
+    options: {
+      prompt: "clip",
+      model: "grok-imagine-video",
+      api_key: "key",
+      base_url: "https://router.test",
+      out: outDir,
+      json: true,
+    },
+  }, {
+    fetch: async (url) => url.endsWith("/v1/video/generations")
+      ? jsonResponse({ id: "task_grok", status: "queued" })
+      : url === "https://router.test/v1/videos/task_grok"
+        ? jsonResponse({
+          id: "task_grok",
+          status: "completed",
+          metadata: { url: "https://cdn.test/grok-video.mp4" },
+        })
+        : {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return Buffer.from("grok-video-bytes");
+          },
+        },
+  });
+
+  assert.equal(result.artifacts.length, 1);
+  assert.match(result.artifacts[0].path, /video-01\.mp4$/);
+  assert.equal(await readFile(result.artifacts[0].path, "utf8"), "grok-video-bytes");
 });
 
 test("auth status masks saved key and logout removes only key", async () => {

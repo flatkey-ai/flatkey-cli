@@ -101,6 +101,8 @@ function extractItems(response) {
   if (typeof response?.metadata?.url === "string") return [{ url: response.metadata.url }];
   if (typeof response?.url === "string") return [response];
   if (typeof response?.video_url?.url === "string") return [{ url: response.video_url.url }];
+  if (typeof response?.video?.url === "string") return [{ url: response.video.url }];
+  if (typeof response?.video?.temp_url === "string") return [{ url: response.video.temp_url }];
   return [];
 }
 

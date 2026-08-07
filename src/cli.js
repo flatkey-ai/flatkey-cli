@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 const COMMANDS = new Set([
   "audio",
   "credits",
@@ -548,11 +550,14 @@ async function handleGenerate(command, deps) {
       const output = await writeTextOutput(text, command.options.output);
       return { kind: command.group, text, output, response };
     }
+    const outDir = command.options.out ?? "flatkey-output";
+    const output = command.options.output
+      ?? (command.group === "video" ? join(outDir, "video-01.mp4") : undefined);
     const artifacts = await persistArtifacts({
       kind: command.group,
       response: artifactResponse,
-      outDir: command.options.out ?? "flatkey-output",
-      output: command.options.output,
+      outDir,
+      output,
       fetch: deps.fetch,
     });
     return { kind: command.group, artifacts, response: scrubArtifactResponse(artifactResponse) };
@@ -649,6 +654,8 @@ function hasArtifact(response) {
       || response?.url
       || response?.temp_url
       || response?.video_url?.url
+      || response?.video?.url
+      || response?.video?.temp_url
       || response?.data?.some?.((item) => item?.url || item?.temp_url || item?.b64_json || item?.base64 || item?.data)
       || response?.artifacts?.some?.((item) => item?.url || item?.temp_url || item?.path)
       || response?.content?.some?.((item) => item?.url || item?.video_url?.url || item?.data_url || item?.b64_json || item?.base64 || item?.data),
@@ -660,7 +667,7 @@ function videoTaskId(response) {
 }
 
 function isVideoDone(response) {
-  return ["completed", "succeeded", "success"].includes(String(response?.status ?? "").toLowerCase());
+  return ["completed", "done", "succeeded", "success"].includes(String(response?.status ?? "").toLowerCase());
 }
 
 function isVideoFailed(response) {
