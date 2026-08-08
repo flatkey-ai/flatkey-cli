@@ -636,7 +636,8 @@ async function waitForVideoResult(response, options) {
 
   while (Date.now() <= deadline) {
     last = await options.getVideo(options, taskId);
-    if (hasArtifact(last) || isVideoDone(last)) return last;
+    if (hasArtifact(last)) return last;
+    if (isVideoDone(last)) return withVideoContentFallback(last, options, taskId);
     if (isVideoFailed(last)) {
       const message = last?.error?.message ?? last?.message ?? `Video generation failed: ${taskId}`;
       throw new Error(message);
@@ -645,6 +646,18 @@ async function waitForVideoResult(response, options) {
   }
 
   throw new Error(`Video task still processing after ${Math.round(timeoutMs / 1000)}s: ${taskId}`);
+}
+
+function withVideoContentFallback(response, options, taskId) {
+  const baseUrl = String(options.baseUrl ?? "").replace(/\/$/, "");
+  if (!baseUrl || !taskId) return response;
+  return {
+    ...response,
+    metadata: {
+      ...(response.metadata ?? {}),
+      url: `${baseUrl}/v1/videos/${encodeURIComponent(taskId)}/content`,
+    },
+  };
 }
 
 function hasArtifact(response) {

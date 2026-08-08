@@ -665,6 +665,38 @@ test("video generation saves remote result to default output directory", async (
   assert.equal(await readFile(result.artifacts[0].path, "utf8"), "grok-video-bytes");
 });
 
+test("video generation falls back to task content endpoint when result omits url", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-video-content-"));
+
+  const result = await runCommand({
+    group: "video",
+    action: "generate",
+    options: {
+      prompt: "小鸟飞过",
+      model: "veo-3.1-fast-generate-preview",
+      api_key: "key",
+      base_url: "https://router.test",
+      out: outDir,
+      json: true,
+    },
+  }, {
+    fetch: async (url) => url.endsWith("/v1/video/generations")
+      ? jsonResponse({ id: "task_veo", status: "queued" })
+      : url === "https://router.test/v1/videos/task_veo"
+        ? jsonResponse({ id: "task_veo", status: "completed", progress: 100 })
+        : {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return Buffer.from("veo-video-bytes");
+          },
+        },
+  });
+
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(await readFile(result.artifacts[0].path, "utf8"), "veo-video-bytes");
+});
+
 test("auth status masks saved key and logout removes only key", async () => {
   const configDir = await mkdtemp(join(tmpdir(), "flatkey-config-"));
   await runCommand({
