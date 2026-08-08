@@ -186,6 +186,8 @@ test("supports MiniMax-H3 resolution values and defaults duration to 5", () => {
     model: "MiniMax-H3",
     prompt: "a bird flies over a lake",
     duration: 5,
+    aspect: "16:9",
+    ratio: "16:9",
     resolution: "768P",
     quality: "768P",
     temp_url: true,
@@ -210,6 +212,17 @@ test("defaults MiniMax-H3 resolution to 768P", () => {
 
   assert.equal(body.resolution, "768P");
   assert.equal(body.quality, "768P");
+});
+
+test("defaults MiniMax-H3 text-only ratio to 16:9", () => {
+  const body = planVideoRequest({
+    apiKey: "key",
+    model: "MiniMax-H3",
+    prompt: "小鸟飞过",
+  }).body;
+
+  assert.equal(body.aspect, "16:9");
+  assert.equal(body.ratio, "16:9");
 });
 
 test("builds MiniMax-H3 content with a non-empty text item", () => {

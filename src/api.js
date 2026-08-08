@@ -77,7 +77,7 @@ export function planVideoRequest(options) {
     ...arrayOption(options.lastFrameUrl),
   ];
   const ratio = validateOptionalValue(
-    optionValue(options, "ratio", "aspect"),
+    optionValue(options, "ratio", "aspect") ?? (isMiniMaxModel(model) ? "16:9" : undefined),
     ["16:9", "9:16", "4:3", "3:4", "21:9", "1:1"],
     "ratio",
   );
