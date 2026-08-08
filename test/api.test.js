@@ -189,6 +189,7 @@ test("supports MiniMax-H3 resolution values and defaults duration to 5", () => {
     resolution: "768P",
     quality: "768P",
     temp_url: true,
+    content: [{ type: "text", text: "a bird flies over a lake" }],
   });
 
   assert.equal(planVideoRequest({
@@ -198,6 +199,28 @@ test("supports MiniMax-H3 resolution values and defaults duration to 5", () => {
     duration: "8",
     resolution: "2K",
   }).body.duration, 8);
+});
+
+test("defaults MiniMax-H3 resolution to 768P", () => {
+  const body = planVideoRequest({
+    apiKey: "key",
+    model: "MiniMax-H3",
+    prompt: "小鸟飞过",
+  }).body;
+
+  assert.equal(body.resolution, "768P");
+  assert.equal(body.quality, "768P");
+});
+
+test("builds MiniMax-H3 content with a non-empty text item", () => {
+  assert.deepEqual(planVideoRequest({
+    apiKey: "key",
+    model: "MiniMax-H3",
+    prompt: "小鸟飞过",
+    resolution: "768P",
+  }).body.content, [
+    { type: "text", text: "小鸟飞过" },
+  ]);
 });
 
 test("builds seedance2 video generation request", async () => {

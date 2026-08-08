@@ -82,7 +82,7 @@ export function planVideoRequest(options) {
     "ratio",
   );
   const resolution = validateOptionalValue(
-    options.resolution,
+    options.resolution ?? (isMiniMaxModel(model) ? "768P" : undefined),
     isMiniMaxModel(model) ? ["768P", "2K"] : ["480p", "720p", "1080p"],
     "resolution",
   );
@@ -101,7 +101,7 @@ export function planVideoRequest(options) {
     images: !isSeedanceModel(model) && imageUrls.length > 0 ? imageUrls : undefined,
   });
   const seedanceContent = buildSeedanceContent(options);
-  if (isSeedanceModel(model) && seedanceContent.length > 0) {
+  if ((isSeedanceModel(model) || isMiniMaxModel(model)) && seedanceContent.length > 0) {
     return planJsonPost(options, "/v1/video/generations", cleanObject({
       ...basePayload,
       content: seedanceContent,
