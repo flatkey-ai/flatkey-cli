@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { DEFAULT_BASE_URL } from "./api.js";
 
 const COMMANDS = new Set([
   "audio",
@@ -502,7 +503,7 @@ async function handleGenerate(command, deps) {
   const options = {
     ...command.options,
     apiKey,
-    baseUrl: routerOrigin,
+    baseUrl: routerOrigin ?? DEFAULT_BASE_URL,
     tempMediaBaseUrl: tempMediaBaseUrl ?? DEFAULT_CONSOLE_URL,
     env: deps.env ?? process.env,
     fetch: deps.fetch,
