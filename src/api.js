@@ -83,13 +83,15 @@ export function planVideoRequest(options) {
   );
   const resolution = validateOptionalValue(
     options.resolution,
-    ["480p", "720p", "1080p"],
+    isMiniMaxModel(model) ? ["768P", "2K"] : ["480p", "720p", "1080p"],
     "resolution",
   );
   const basePayload = cleanObject({
     model,
     prompt: options.prompt,
-    duration: parseOptionalInteger(options.duration),
+    duration: options.duration === undefined && isMiniMaxModel(model)
+      ? 5
+      : parseOptionalInteger(options.duration),
     aspect: ratio,
     ratio,
     resolution,
@@ -376,6 +378,10 @@ function validateOptionalValue(value, allowed, name) {
 
 function isSeedanceModel(model) {
   return /seedance/i.test(model);
+}
+
+function isMiniMaxModel(model) {
+  return /^minimax-h3$/i.test(model);
 }
 
 function buildSeedanceContent(options) {

@@ -175,6 +175,31 @@ test("rejects unsupported video ratio and resolution values", () => {
   );
 });
 
+test("supports MiniMax-H3 resolution values and defaults duration to 5", () => {
+  assert.deepEqual(planVideoRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "MiniMax-H3",
+    prompt: "a bird flies over a lake",
+    resolution: "768P",
+  }).body, {
+    model: "MiniMax-H3",
+    prompt: "a bird flies over a lake",
+    duration: 5,
+    resolution: "768P",
+    quality: "768P",
+    temp_url: true,
+  });
+
+  assert.equal(planVideoRequest({
+    apiKey: "key",
+    model: "MiniMax-H3",
+    prompt: "a bird flies over a lake",
+    duration: "8",
+    resolution: "2K",
+  }).body.duration, 8);
+});
+
 test("builds seedance2 video generation request", async () => {
   const { fetch, calls } = fetchRecorder({ data: [] });
 
