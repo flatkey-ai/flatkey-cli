@@ -97,6 +97,7 @@ export function planVideoRequest(options) {
     resolution,
     quality: resolution,
     fps: parseOptionalInteger(options.fps),
+    generate_audio: parseOptionalBoolean(options.generate_audio) ?? true,
     temp_url: true,
     images: !isSeedanceModel(model) && imageUrls.length > 0 ? imageUrls : undefined,
   });
@@ -361,6 +362,13 @@ function parseOptionalInteger(value) {
 function parseOptionalFloat(value) {
   if (value === undefined) return undefined;
   return Number.parseFloat(value);
+}
+
+function parseOptionalBoolean(value) {
+  if (value === undefined) return undefined;
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  throw new Error(`Invalid boolean value: ${value}. Allowed values: true, false`);
 }
 
 function optionValue(options, ...keys) {

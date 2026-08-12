@@ -136,8 +136,22 @@ test("builds video generation request", async () => {
     resolution: "720p",
     quality: "720p",
     fps: 24,
+    generate_audio: true,
     temp_url: true,
   });
+});
+
+test("defaults video generation audio to true and accepts false", () => {
+  assert.equal(planVideoRequest({
+    apiKey: "key",
+    prompt: "silent clip",
+  }).body.generate_audio, true);
+
+  assert.equal(planVideoRequest({
+    apiKey: "key",
+    prompt: "silent clip",
+    generate_audio: "false",
+  }).body.generate_audio, false);
 });
 
 test("video request keeps aspect alias for ratio", () => {
@@ -152,6 +166,7 @@ test("video request keeps aspect alias for ratio", () => {
     content: [{ type: "text", text: "walkthrough" }],
     aspect: "9:16",
     ratio: "9:16",
+    generate_audio: true,
     temp_url: true,
   });
 });
@@ -190,6 +205,7 @@ test("supports MiniMax-H3 resolution values and defaults duration to 5", () => {
     ratio: "16:9",
     resolution: "768P",
     quality: "768P",
+    generate_audio: true,
     temp_url: true,
     content: [{ type: "text", text: "a bird flies over a lake" }],
   });
@@ -252,6 +268,7 @@ test("builds seedance2 video generation request", async () => {
     model: "seedance2",
     prompt: "newsroom b-roll",
     content: [{ type: "text", text: "newsroom b-roll" }],
+    generate_audio: true,
     temp_url: true,
   });
 });
@@ -267,6 +284,7 @@ test("builds seedance video request with official content payload", () => {
     model: "Seedance2.0-pro",
     prompt: "小猫睡觉",
     content: [{ type: "text", text: "小猫睡觉" }],
+    generate_audio: true,
     temp_url: true,
   });
 });
@@ -292,6 +310,7 @@ test("builds seedance video request with reference media content", () => {
       { type: "image_url", image_url: { url: "https://example.com/last.png" }, role: "last_frame" },
       { type: "video_url", video_url: { url: "https://example.com/ref.mp4" }, role: "reference_video" },
     ],
+    generate_audio: true,
     temp_url: true,
   });
 });
@@ -307,6 +326,7 @@ test("passes image references to generic video request images", () => {
     model: "veo-3",
     prompt: "walkthrough",
     images: ["https://example.com/a.png"],
+    generate_audio: true,
     temp_url: true,
   });
 });

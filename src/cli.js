@@ -40,7 +40,7 @@ const COMMAND_OPTIONS = {
   "text generate": new Set(["model", "prompt"]),
   version: new Set([]),
   video: new Set([]),
-  "video generate": new Set(["aspect", "duration", "first_frame", "first_frame_url", "fps", "image", "image_url", "last_frame", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
+  "video generate": new Set(["aspect", "duration", "first_frame", "first_frame_url", "fps", "generate_audio", "image", "image_url", "last_frame", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
 };
 
 export function parseArgv(argv) {

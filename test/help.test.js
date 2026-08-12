@@ -55,4 +55,5 @@ test("command help covers each command and action", () => {
     assert.match(getCommandHelp(...topic.split(" ")), /Usage: flatkey/);
   }
   assert.match(getCommandHelp("video", "generate"), /--resolution/);
+  assert.match(getCommandHelp("video", "generate"), /--generate-audio/);
 });

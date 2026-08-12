@@ -108,6 +108,17 @@ test("parses video ratio and resolution controls", () => {
   });
 });
 
+test("parses video generate-audio control", () => {
+  assert.equal(parseArgv([
+    "video",
+    "generate",
+    "--prompt",
+    "silent clip",
+    "--generate-audio",
+    "false",
+  ]).options.generate_audio, "false");
+});
+
 test("parses repeatable video reference controls", () => {
   const command = parseArgv([
     "video",

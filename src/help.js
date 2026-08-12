@@ -218,6 +218,7 @@ Options:
   --duration <seconds>            Video duration
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
   --resolution <value>            480p, 720p, or 1080p
+  --generate-audio <true|false>   Generate audio, default true
   --image <file>                  Upload local reference image, repeatable
   --image-url <url>               Add reference image URL, repeatable
   --first-frame <file>            Upload local first frame image
@@ -235,6 +236,7 @@ Options:
   --duration <seconds>            Video duration
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
   --resolution <value>            480p, 720p, or 1080p
+  --generate-audio <true|false>   Generate audio, default true
   --image <file>                  Upload local reference image, repeatable
   --image-url <url>               Add reference image URL, repeatable
   --first-frame <file>            Upload local first frame image
