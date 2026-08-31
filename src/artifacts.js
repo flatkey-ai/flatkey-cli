@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
 
@@ -32,13 +32,21 @@ export async function persistArtifacts({
   const items = extractItems(response);
   const artifacts = [];
   await mkdir(output ? dirname(output) : outDir, { recursive: true });
+  const startIndex = output ? 0 : await nextArtifactIndex({ kind, outDir });
 
   for (const [index, item] of items.entries()) {
-    const artifact = await persistItem({ kind, item, outDir, output, index, fetchImpl });
+    const artifact = await persistItem({ kind, item, outDir, output, index: index + startIndex, fetchImpl });
     if (artifact) artifacts.push(artifact);
   }
 
   return artifacts;
+}
+
+export async function nextArtifactPath({ kind, outDir = "flatkey-output" }) {
+  const extension = DEFAULT_EXTENSIONS[kind] ?? "bin";
+  const index = await nextArtifactIndex({ kind, outDir });
+  const number = String(index + 1).padStart(2, "0");
+  return join(outDir, `${kind}-${number}.${extension}`);
 }
 
 function expandHomePath(path) {
@@ -135,4 +143,24 @@ function artifactPath({ kind, outDir, output, index, extension }) {
   }
   const number = String(index + 1).padStart(2, "0");
   return join(outDir, `${kind}-${number}.${extension}`);
+}
+
+async function nextArtifactIndex({ kind, outDir }) {
+  const extension = DEFAULT_EXTENSIONS[kind] ?? "bin";
+  const pattern = new RegExp(`^${escapeRegExp(kind)}-(\\d+)\\.${escapeRegExp(extension)}$`);
+  let max = 0;
+  try {
+    for (const entry of await readdir(outDir)) {
+      const match = pattern.exec(entry);
+      if (!match) continue;
+      max = Math.max(max, Number.parseInt(match[1], 10));
+    }
+  } catch {
+    return 0;
+  }
+  return max;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

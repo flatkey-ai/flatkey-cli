@@ -17,11 +17,19 @@ export async function generateImage(options) {
 }
 
 export async function uploadTempMediaImage(options) {
+  return uploadTempMediaByKind(options, "images");
+}
+
+export async function uploadTempMediaVideo(options) {
+  return uploadTempMediaByKind(options, "videos");
+}
+
+async function uploadTempMediaByKind(options, kind) {
   const form = new FormData();
   form.append("file", new Blob([options.file], cleanObject({
     type: options.contentType,
-  })), options.filename ?? "image");
-  return requestJsonFromPlan(options, planRequest(options, "/v1/temp-media/images", {
+  })), options.filename ?? (kind === "videos" ? "video" : "image"));
+  return requestJsonFromPlan(options, planRequest(options, `/v1/temp-media/${kind}`, {
     method: "POST",
     headers: authHeaders(options.apiKey),
     body: form,
@@ -30,6 +38,13 @@ export async function uploadTempMediaImage(options) {
 
 export function planImageRequest(options) {
   const model = options.model ?? "nano-banana-pro-preview";
+  const mediaInputs = orderedMediaInputs(options);
+  assertReferenceImageLimit(mediaInputs, "image");
+  if (mediaInputs.some((entry) => entry.kind === "video")) {
+    throw new Error("Image models only accept image inputs.");
+  }
+  const imageUrls = mediaInputs
+    .map((entry) => entry.url);
   if (model.startsWith("gpt")) {
     const responseFormat = options.response_format ?? options.responseFormat ?? "url";
     const tempUrl = options.temp_url ?? options.tempUrl;
@@ -41,6 +56,7 @@ export function planImageRequest(options) {
       quality: options.quality,
       response_format: responseFormat,
       temp_url: tempUrl ?? true,
+      images: imageUrls.length > 0 ? imageUrls : undefined,
     }));
   }
 
@@ -52,7 +68,12 @@ export function planImageRequest(options) {
       "x-goog-api-key": options.apiKey,
     },
     body: {
-      contents: [{ parts: [{ text: options.prompt }] }],
+      contents: [{
+        parts: [
+          { text: options.prompt },
+          ...imageUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+        ],
+      }],
       temp_url: true,
     },
   });
@@ -68,14 +89,15 @@ export function getVideo(options, taskId) {
 
 export function planVideoRequest(options) {
   const model = options.model ?? "seedance-2.0-pro";
-  const imageUrls = [
-    ...arrayOption(options.image_url),
-    ...arrayOption(options.imageUrl),
-    ...arrayOption(options.first_frame_url),
-    ...arrayOption(options.firstFrameUrl),
-    ...arrayOption(options.last_frame_url),
-    ...arrayOption(options.lastFrameUrl),
-  ];
+  const mediaInputs = orderedMediaInputs(options);
+  assertReferenceImageLimit(mediaInputs, "video");
+  if (mediaInputs.some((entry) => entry.role === "first_frame" && entry.kind === "video")
+    || mediaInputs.some((entry) => entry.role === "last_frame" && entry.kind === "video")) {
+    throw new Error("Video first-frame and last-frame inputs must be images.");
+  }
+  const imageUrls = mediaInputs
+    .filter((entry) => entry.kind !== "video")
+    .map((entry) => entry.url);
   const ratio = validateOptionalValue(
     optionValue(options, "ratio", "aspect") ?? (isMiniMaxModel(model) ? "16:9" : undefined),
     ["16:9", "9:16", "4:3", "3:4", "21:9", "1:1"],
@@ -101,7 +123,7 @@ export function planVideoRequest(options) {
     temp_url: true,
     images: !isSeedanceModel(model) && imageUrls.length > 0 ? imageUrls : undefined,
   });
-  const seedanceContent = buildSeedanceContent(options);
+  const seedanceContent = buildSeedanceContent(options, mediaInputs);
   if ((isSeedanceModel(model) || isMiniMaxModel(model)) && seedanceContent.length > 0) {
     return planJsonPost(options, "/v1/video/generations", cleanObject({
       ...basePayload,
@@ -392,34 +414,17 @@ function isMiniMaxModel(model) {
   return /^minimax-h3$/i.test(model);
 }
 
-function buildSeedanceContent(options) {
+function buildSeedanceContent(options, mediaInputs = orderedMediaInputs(options)) {
   const content = [];
   if (options.prompt !== undefined) {
     content.push({ type: "text", text: options.prompt });
   }
-  for (const url of arrayOption(options.image_url)) {
-    content.push({ type: "image_url", image_url: { url }, role: "reference_image" });
-  }
-  for (const url of arrayOption(options.imageUrl)) {
-    content.push({ type: "image_url", image_url: { url }, role: "reference_image" });
-  }
-  for (const url of arrayOption(options.first_frame_url)) {
-    content.push({ type: "image_url", image_url: { url }, role: "first_frame" });
-  }
-  for (const url of arrayOption(options.firstFrameUrl)) {
-    content.push({ type: "image_url", image_url: { url }, role: "first_frame" });
-  }
-  for (const url of arrayOption(options.last_frame_url)) {
-    content.push({ type: "image_url", image_url: { url }, role: "last_frame" });
-  }
-  for (const url of arrayOption(options.lastFrameUrl)) {
-    content.push({ type: "image_url", image_url: { url }, role: "last_frame" });
-  }
-  for (const url of arrayOption(options.video_url)) {
-    content.push({ type: "video_url", video_url: { url }, role: "reference_video" });
-  }
-  for (const url of arrayOption(options.videoUrl)) {
-    content.push({ type: "video_url", video_url: { url }, role: "reference_video" });
+  for (const entry of mediaInputs) {
+    if (entry.kind === "video") {
+      content.push({ type: "video_url", video_url: { url: entry.url }, role: entry.role ?? "reference_video" });
+      continue;
+    }
+    content.push({ type: "image_url", image_url: { url: entry.url }, role: entry.role ?? "reference_image" });
   }
   return content;
 }
@@ -433,6 +438,49 @@ function cleanObject(value) {
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined),
   );
+}
+
+function assertReferenceImageLimit(mediaInputs, kind) {
+  const imageInputs = mediaInputs.filter((entry) => entry.kind !== "video");
+  if (imageInputs.length <= 5) return;
+  throw new Error(`Too many reference images for flatkey ${kind} generate: maximum 5.`);
+}
+
+function orderedMediaInputs(options) {
+  const hidden = Array.isArray(options.__media_inputs) ? options.__media_inputs : [];
+  if (hidden.length > 0 && hidden[0] && Object.prototype.hasOwnProperty.call(hidden[0], "url")) {
+    return hidden;
+  }
+  if (hidden.length > 0) {
+    return hidden.map((entry) => ({
+      ...entry,
+      url: entry.url ?? entry.value,
+      kind: entry.kind ?? inferMediaKindFromName(entry.name, entry.value),
+    }));
+  }
+
+  const legacy = [];
+  const push = (name, value, kind = "image", role) => {
+    for (const item of arrayOption(value)) {
+      legacy.push({ name, url: item, kind: kind === "image" ? inferMediaKindFromName(name, item) : kind, role });
+    }
+  };
+  push("file", options.file, "image");
+  push("image", options.image, "image");
+  push("image_url", options.image_url, "image");
+  push("first_frame", options.first_frame, "image", "first_frame");
+  push("first_frame_url", options.first_frame_url, "image", "first_frame");
+  push("last_frame", options.last_frame, "image", "last_frame");
+  push("last_frame_url", options.last_frame_url, "image", "last_frame");
+  push("video_url", options.video_url, "video", "reference_video");
+  return legacy;
+}
+
+function inferMediaKindFromName(name, value) {
+  const lowerName = String(name ?? "").toLowerCase();
+  if (lowerName.includes("video")) return "video";
+  if (typeof value === "string" && value.toLowerCase().endsWith(".mp4")) return "video";
+  return "image";
 }
 
 async function readJson(response) {

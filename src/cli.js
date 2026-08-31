@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { DEFAULT_BASE_URL } from "./api.js";
+import { nextArtifactPath, persistArtifacts } from "./artifacts.js";
 
 const COMMANDS = new Set([
   "audio",
@@ -20,6 +21,8 @@ const COMMANDS = new Set([
 const GROUP_ACTIONS = new Set(["audio", "auth", "image", "text", "video"]);
 const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "console_url", "dry_run", "help", "json", "output", "out", "verbose"]);
 const REPEATABLE_OPTIONS = new Set(["image", "image_url", "video_url"]);
+const MEDIA_INPUT_OPTIONS = new Set(["file", "image", "image_url", "video_url", "first_frame", "first_frame_url", "last_frame", "last_frame_url"]);
+const MAX_REFERENCE_IMAGES = 5;
 const COMMAND_OPTIONS = {
   "audio generate": new Set(["model", "prompt", "similarity_boost", "stability", "style", "voice_id"]),
   "audio music": new Set(["music_length_ms", "prompt"]),
@@ -29,7 +32,7 @@ const COMMAND_OPTIONS = {
   credits: new Set([]),
   help: new Set(["ai", "command"]),
   image: new Set([]),
-  "image generate": new Set(["model", "n", "prompt", "quality", "size"]),
+  "image generate": new Set(["file", "image", "image_url", "model", "n", "prompt", "quality", "size"]),
   "image upload": new Set(["file"]),
   login: new Set(["console_url", "no_open", "open"]),
   logout: new Set([]),
@@ -40,7 +43,7 @@ const COMMAND_OPTIONS = {
   "text generate": new Set(["model", "prompt"]),
   version: new Set([]),
   video: new Set([]),
-  "video generate": new Set(["aspect", "duration", "first_frame", "first_frame_url", "fps", "generate_audio", "image", "image_url", "last_frame", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
+  "video generate": new Set(["aspect", "duration", "file", "first_frame", "first_frame_url", "fps", "generate_audio", "image", "image_url", "last_frame", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
 };
 
 export function parseArgv(argv) {
@@ -61,7 +64,7 @@ export function parseArgv(argv) {
     return validateCommandOptions({
       group: "help",
       action: undefined,
-      options: { command: maybeAction, ...parseOptions(rest) },
+      options: { command: maybeAction, ...parseOptions(rest, repeatableOptionsFor("help")) },
     });
   }
 
@@ -81,7 +84,7 @@ export function parseArgv(argv) {
       group,
       action,
       options: {
-        ...parseOptions(optionTokens.filter((token) => token !== "help" && token !== "--help" && token !== "-h")),
+        ...parseOptions(optionTokens.filter((token) => token !== "help" && token !== "--help" && token !== "-h"), repeatableOptionsFor(group, action)),
         help: true,
       },
     });
@@ -90,7 +93,7 @@ export function parseArgv(argv) {
   return validateCommandOptions({
     group,
     action,
-    options: parseOptions(optionTokens),
+    options: parseOptions(optionTokens, repeatableOptionsFor(group, action)),
   });
 }
 
@@ -98,8 +101,9 @@ function isHelpToken(token) {
   return token === "help" || token === "--help" || token === "-h";
 }
 
-function parseOptions(tokens) {
+function parseOptions(tokens, repeatableOptions = REPEATABLE_OPTIONS) {
   const options = {};
+  const mediaInputs = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (token === "-o") {
@@ -120,14 +124,34 @@ function parseOptions(tokens) {
       options[name] = true;
       continue;
     }
-    if (REPEATABLE_OPTIONS.has(name)) {
+    if (repeatableOptions.has(name)) {
       options[name] = [...asArray(options[name]), next];
     } else {
       options[name] = next;
     }
+    if (MEDIA_INPUT_OPTIONS.has(name)) {
+      mediaInputs.push({ name, value: next });
+    }
     index += 1;
   }
+  if (mediaInputs.length > 0) {
+    Object.defineProperty(options, "__media_inputs", {
+      value: mediaInputs,
+      enumerable: false,
+      writable: true,
+    });
+  }
   return options;
+}
+
+function repeatableOptionsFor(group, action) {
+  if (group === "image" && action === "generate") {
+    return new Set([...REPEATABLE_OPTIONS, "file"]);
+  }
+  if (group === "video" && action === "generate") {
+    return new Set([...REPEATABLE_OPTIONS, "file"]);
+  }
+  return REPEATABLE_OPTIONS;
 }
 
 function asArray(value) {
@@ -139,6 +163,7 @@ function validateCommandOptions(command) {
   const key = command.action ? `${command.group} ${command.action}` : command.group;
   const allowed = COMMAND_OPTIONS[key] ?? new Set();
   for (const option of Object.keys(command.options)) {
+    if (option.startsWith("_")) continue;
     if (GLOBAL_OPTIONS.has(option) || allowed.has(option)) continue;
     const flag = `--${option.replaceAll("_", "-")}`;
     const helpCommand = command.action
@@ -238,13 +263,17 @@ export async function runCommand(command, deps = {}) {
 }
 
 async function handleLogin(command, deps) {
-  const { ensureDeviceId, readConfig, writeAuthConfig } = await import("./config.js");
+  const { ensureDeviceId, readConfig, resolveOrigins, writeAuthConfig } = await import("./config.js");
   const { DEFAULT_CONSOLE_URL, createDeviceAuthorization, pollDeviceAuthorization } = await import("./api.js");
   const deviceId = await ensureDeviceId({ configDir: deps.configDir });
   const version = await readPackageVersion();
-  const consoleOrigin = firstNonEmpty(command.options.console_url, DEFAULT_CONSOLE_URL);
+  const { consoleOrigin } = await resolveOrigins({
+    consoleUrl: command.options.console_url,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
   const requestOptions = {
-    consoleUrl: consoleOrigin,
+    consoleUrl: consoleOrigin ?? DEFAULT_CONSOLE_URL,
     fetch: deps.fetch,
     verbose: command.options.verbose,
     verboseLog: verboseLogger(deps.stderr, command.options.verbose),
@@ -426,6 +455,10 @@ async function handleImageUpload(command, deps) {
   if (typeof file !== "string" || file.trim() === "") {
     throw new Error("Missing --file value. Run `flatkey image upload --help` to see supported options.");
   }
+  const media = mediaInfoFromPath(file);
+  if (!media || media.kind !== "image") {
+    throw new Error(`Unsupported image file type: ${file}`);
+  }
   const apiKey = await resolveApiKey({
     apiKey: command.options.api_key,
     env: deps.env ?? process.env,
@@ -441,13 +474,13 @@ async function handleImageUpload(command, deps) {
     baseUrl: consoleOrigin ?? DEFAULT_CONSOLE_URL,
     file: await readFile(await expandHomePath(file)),
     filename: basename(file),
-    contentType: imageContentTypeFromPath(file),
+    contentType: media.contentType,
     fetch: deps.fetch,
     verbose: command.options.verbose,
     verboseLog: verboseLogger(deps.stderr, command.options.verbose),
   });
   const data = response?.data ?? response;
-  const signedUrl = extractUploadedImageUrl(response);
+  const signedUrl = extractUploadedMediaUrl(response);
   if (!signedUrl) {
     throw new Error("Image upload failed: missing signed_url.");
   }
@@ -479,8 +512,8 @@ async function handleGenerate(command, deps) {
     planTextRequest,
     planVideoRequest,
     uploadTempMediaImage,
+    uploadTempMediaVideo,
   } = await import("./api.js");
-  const { persistArtifacts } = await import("./artifacts.js");
   const { createAnimation } = await import("./animation.js");
   const apiKey = command.options.dry_run
     ? (command.options.api_key ?? "FLATKEY_API_KEY")
@@ -509,8 +542,20 @@ async function handleGenerate(command, deps) {
     fetch: deps.fetch,
     verboseLog: verboseLogger(deps.stderr, command.options.verbose),
   };
-  if (command.group === "video" && !command.options.dry_run) {
-    await uploadVideoLocalImages(options, { uploadTempMediaImage });
+  if (Array.isArray(command.options.__media_inputs)) {
+    options.__media_inputs = command.options.__media_inputs;
+  }
+  if (command.group === "image" || command.group === "video") {
+    await prepareMediaInputs(command, options, {
+      apiKey,
+      baseUrl: options.baseUrl,
+      tempMediaBaseUrl: tempMediaBaseUrl ?? DEFAULT_CONSOLE_URL,
+      fetch: deps.fetch,
+      verbose: command.options.verbose,
+      verboseLog: verboseLogger(deps.stderr, command.options.verbose),
+      uploadTempMediaImage,
+      uploadTempMediaVideo,
+    });
   }
   if (command.options.dry_run) {
     const request = command.group === "image"
@@ -553,7 +598,7 @@ async function handleGenerate(command, deps) {
     }
     const outDir = command.options.out ?? "flatkey-output";
     const output = command.options.output
-      ?? (command.group === "video" ? join(outDir, "video-01.mp4") : undefined);
+      ?? (command.group === "video" ? await nextArtifactPath({ kind: command.group, outDir }) : undefined);
     const artifacts = await persistArtifacts({
       kind: command.group,
       response: artifactResponse,
@@ -567,56 +612,160 @@ async function handleGenerate(command, deps) {
   }
 }
 
-async function uploadVideoLocalImages(options, deps) {
-  const localImages = asArray(options.image);
-  const firstFrame = options.first_frame;
-  const lastFrame = options.last_frame;
-  if (localImages.length === 0 && !firstFrame && !lastFrame) return;
+async function prepareMediaInputs(command, options, deps) {
+  const mediaInputs = orderedMediaInputs(command, options);
+  if (mediaInputs.length === 0) return;
+  assertMediaReferenceLimit(mediaInputs, command.group);
 
-  const uploads = [];
-  for (const file of localImages) {
-    uploads.push(await uploadLocalImage(file, options, deps));
+  const resolved = [];
+  for (const input of mediaInputs) {
+    if (input.kind === "local") {
+      resolved.push(await uploadLocalMedia(input.value, command.group, deps, input.name));
+    } else {
+      resolved.push(await confirmRemoteMediaUrl(input.value, command.group, deps, input.name));
+    }
   }
-  if (uploads.length > 0) {
-    options.image_url = [...asArray(options.image_url), ...uploads];
-  }
-  if (firstFrame) {
-    options.first_frame_url = await uploadLocalImage(firstFrame, options, deps);
-  }
-  if (lastFrame) {
-    options.last_frame_url = await uploadLocalImage(lastFrame, options, deps);
-  }
+  options.__media_inputs = resolved;
 }
 
-async function uploadLocalImage(file, options, deps) {
+function assertMediaReferenceLimit(mediaInputs, commandGroup) {
+  const imageInputs = mediaInputs.filter((entry) => entry.kind !== "video");
+  if (imageInputs.length <= MAX_REFERENCE_IMAGES) return;
+  throw new Error(`Too many reference images for flatkey ${commandGroup} generate: maximum ${MAX_REFERENCE_IMAGES}.`);
+}
+
+function orderedMediaInputs(command, options) {
+  const mediaInputs = Array.isArray(options.__media_inputs) ? options.__media_inputs : [];
+  if (mediaInputs.length > 0 && mediaInputs[0] && Object.prototype.hasOwnProperty.call(mediaInputs[0], "kind")) {
+    return mediaInputs;
+  }
+  if (mediaInputs.length > 0) {
+    return mediaInputs.map((entry) => ({
+      name: entry.name,
+      value: entry.value,
+      kind: entry.name.endsWith("_url") ? "url" : "local",
+    }));
+  }
+
+  const legacyInputs = [];
+  const pushLocal = (name, value) => {
+    for (const file of asArray(value)) {
+      legacyInputs.push({ name, value: file, kind: "local" });
+    }
+  };
+  const pushUrl = (name, value) => {
+    for (const url of asArray(value)) {
+      legacyInputs.push({ name, value: url, kind: "url" });
+    }
+  };
+
+  pushLocal("file", options.file);
+  pushLocal("image", options.image);
+  pushUrl("image_url", options.image_url);
+  if (command.group === "video") {
+    pushUrl("video_url", options.video_url);
+    pushLocal("first_frame", options.first_frame);
+    pushUrl("first_frame_url", options.first_frame_url);
+    pushLocal("last_frame", options.last_frame);
+    pushUrl("last_frame_url", options.last_frame_url);
+  }
+  return legacyInputs;
+}
+
+async function uploadLocalMedia(file, commandGroup, deps, optionName) {
   const { basename } = await import("node:path");
   const { readFile } = await import("node:fs/promises");
-  const response = await deps.uploadTempMediaImage({
-    apiKey: options.apiKey,
-    baseUrl: options.tempMediaBaseUrl ?? options.baseUrl,
+  const media = mediaInfoFromPath(file);
+  const allowedKinds = allowedMediaKindsForOption(commandGroup, optionName);
+  if (!media || !allowedKinds.has(media.kind)) {
+    throw new Error(`Unsupported --${optionName.replaceAll("_", "-")} file type for flatkey ${commandGroup} generate: ${file}`);
+  }
+  const uploader = media.kind === "video" ? deps.uploadTempMediaVideo : deps.uploadTempMediaImage;
+  const response = await uploader({
+    apiKey: deps.apiKey,
+    baseUrl: deps.tempMediaBaseUrl ?? deps.baseUrl,
     file: await readFile(await expandHomePath(file)),
     filename: basename(file),
-    contentType: imageContentTypeFromPath(file),
-    fetch: options.fetch,
-    verbose: options.verbose,
-    verboseLog: options.verboseLog,
+    contentType: media.contentType,
+    fetch: deps.fetch,
+    verbose: deps.verbose,
+    verboseLog: deps.verboseLog,
   });
-  const url = extractUploadedImageUrl(response);
-  if (!url) throw new Error(`Image upload failed: missing signed_url for ${file}`);
-  return url;
+  const url = extractUploadedMediaUrl(response);
+  if (!url) throw new Error(`Media upload failed: missing signed_url for ${file}`);
+  return {
+    name: optionName,
+    value: url,
+    kind: media.kind,
+    role: mediaRoleFromOption(optionName, media.kind),
+    mime: media.contentType,
+  };
 }
 
-function extractUploadedImageUrl(response) {
+async function confirmRemoteMediaUrl(url, commandGroup, deps, optionName) {
+  const fetchImpl = deps.fetch ?? fetch;
+  const response = await fetchImpl(url, { method: "HEAD" });
+  const media = mediaInfoFromMime(headerValue(response?.headers, "content-type"));
+  const allowedKinds = allowedMediaKindsForOption(commandGroup, optionName);
+  if (!media || !allowedKinds.has(media.kind)) {
+    throw new Error(`Unsupported --${optionName.replaceAll("_", "-")} MIME type for flatkey ${commandGroup} generate: ${headerValue(response?.headers, "content-type") ?? "unknown"}`);
+  }
+  return {
+    name: optionName,
+    value: url,
+    kind: media.kind,
+    role: mediaRoleFromOption(optionName, media.kind),
+    mime: media.contentType,
+  };
+}
+
+function extractUploadedMediaUrl(response) {
   const data = response?.data ?? response;
   return data?.signed_url ?? data?.signedUrl ?? data?.url ?? response?.signed_url ?? response?.signedUrl ?? response?.url;
 }
 
-function imageContentTypeFromPath(file) {
+function mediaInfoFromPath(file) {
   const lower = String(file).toLowerCase();
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return { kind: "image", contentType: "image/jpeg" };
+  if (lower.endsWith(".png")) return { kind: "image", contentType: "image/png" };
+  if (lower.endsWith(".webp")) return { kind: "image", contentType: "image/webp" };
+  if (lower.endsWith(".mp4")) return { kind: "video", contentType: "video/mp4" };
   return undefined;
+}
+
+function mediaInfoFromMime(contentType) {
+  if (typeof contentType !== "string") return undefined;
+  const lower = contentType.toLowerCase();
+  if (lower.startsWith("image/jpeg")) return { kind: "image", contentType: "image/jpeg" };
+  if (lower.startsWith("image/png")) return { kind: "image", contentType: "image/png" };
+  if (lower.startsWith("image/webp")) return { kind: "image", contentType: "image/webp" };
+  if (lower.startsWith("video/mp4")) return { kind: "video", contentType: "video/mp4" };
+  return undefined;
+}
+
+function mediaRoleFromOption(optionName, kind) {
+  if (optionName === "first_frame" || optionName === "first_frame_url") return "first_frame";
+  if (optionName === "last_frame" || optionName === "last_frame_url") return "last_frame";
+  if (kind === "video") return "reference_video";
+  return "reference_image";
+}
+
+function allowedMediaKindsForOption(commandGroup, optionName) {
+  if (commandGroup === "image") return new Set(["image"]);
+  if (optionName === "file") return new Set(["image", "video"]);
+  if (optionName === "video_url") return new Set(["video"]);
+  if (optionName === "first_frame" || optionName === "first_frame_url" || optionName === "last_frame" || optionName === "last_frame_url" || optionName === "image" || optionName === "image_url") {
+    return new Set(["image"]);
+  }
+  return new Set(["image"]);
+}
+
+function headerValue(headers, name) {
+  if (!headers) return undefined;
+  if (typeof headers.get === "function") {
+    return headers.get(name) ?? headers.get(name.toLowerCase());
+  }
+  return headers[name] ?? headers[name.toLowerCase()];
 }
 
 async function waitForVideoResult(response, options) {

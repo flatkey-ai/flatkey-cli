@@ -14,8 +14,8 @@ JSON mode:
 - ASCII animation and human logs are disabled.
 
 Commands:
-- flatkey image generate --prompt "<prompt>" --json [--model <model>] [--output image.png]
-- flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--ratio 16:9] [--resolution 720p] [--output video.mp4]
+- flatkey image generate --prompt "<prompt>" --json [--model <model>] [--file <path>] [--image-url <url>] [--output image.png]
+- flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--file <path>] [--image-url <url>] [--video-url <url>] [--ratio 16:9] [--resolution 720p] [--output video.mp4]
 - flatkey audio generate --prompt "<text>" --json [--voice-id <voice_id>] [--model eleven_multilingual_v2] [--output speech.mp3]
 - flatkey audio sfx --prompt "<sound>" --json [--duration <seconds>] [--output sfx.mp3]
 - flatkey audio music --prompt "<music prompt>" --json [--music-length-ms <ms>] [--output music.mp3]
@@ -66,6 +66,9 @@ Commands:
 
 Global options:
   --json                         Print machine-readable JSON
+  --file <path>                   Attach local media input
+  --image-url <url>               Add remote image input, repeatable
+  --video-url <url>               Add remote video input, repeatable
   --output, -o <file>             Write generated output to a local file
   --verbose                      Print request/response logs to stderr
   --base-url <url>               Override Flatkey router URL
@@ -163,6 +166,8 @@ Options:
   --size <size>                  Image size for OpenAI-style image models
   --quality <quality>             Image quality for supported models
   --n <count>                    Number of images for supported models
+  --file <path>                  Local image input, repeatable
+  --image-url <url>               Remote image input, repeatable
   --output, -o <file>             Write image file
   --json                         Print machine-readable JSON`,
   models: `Usage: flatkey models [options]
@@ -221,6 +226,7 @@ Options:
   --generate-audio <true|false>   Generate audio, default true
   --image <file>                  Upload local reference image, repeatable
   --image-url <url>               Add reference image URL, repeatable
+  --file <path>                   Local image or video input, repeatable
   --first-frame <file>            Upload local first frame image
   --video-url <url>               Add reference video URL, repeatable
   --first-frame-url <url>         Add first frame image URL
@@ -239,6 +245,7 @@ Options:
   --generate-audio <true|false>   Generate audio, default true
   --image <file>                  Upload local reference image, repeatable
   --image-url <url>               Add reference image URL, repeatable
+  --file <path>                   Local image or video input, repeatable
   --first-frame <file>            Upload local first frame image
   --video-url <url>               Add reference video URL, repeatable
   --first-frame-url <url>         Add first frame image URL

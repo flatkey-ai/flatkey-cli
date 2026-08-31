@@ -67,6 +67,39 @@ test("parses output aliases", () => {
   );
 });
 
+test("parses repeatable file and media url inputs", () => {
+  const image = parseArgv([
+    "image",
+    "generate",
+    "--prompt",
+    "x",
+    "--file",
+    "./a.png",
+    "--file",
+    "./b.webp",
+    "--image-url",
+    "https://example.com/c.png",
+  ]);
+  assert.deepEqual(image.options.file, ["./a.png", "./b.webp"]);
+  assert.deepEqual(image.options.image_url, ["https://example.com/c.png"]);
+
+  const video = parseArgv([
+    "video",
+    "generate",
+    "--prompt",
+    "x",
+    "--file",
+    "./a.png",
+    "--image-url",
+    "https://example.com/b.png",
+    "--video-url",
+    "https://example.com/c.mp4",
+  ]);
+  assert.deepEqual(video.options.file, ["./a.png"]);
+  assert.deepEqual(video.options.image_url, ["https://example.com/b.png"]);
+  assert.deepEqual(video.options.video_url, ["https://example.com/c.mp4"]);
+});
+
 test("parses image upload command", () => {
   assert.deepEqual(parseArgv(["image", "upload", "--file", "./cat.png", "--json"]), {
     group: "image",
@@ -488,7 +521,31 @@ test("empty origin env vars fall back to default origins", async () => {
   assert.equal(fetchCalls[0], "https://console.flatkey.ai/api/cli/device_authorizations");
 });
 
-test("login defaults to production console even when console env is set", async () => {
+test("login falls back to production console when console env is absent", async () => {
+  const fetchCalls = [];
+  await runCommand({
+    group: "login",
+    action: undefined,
+    options: { json: true, no_open: true },
+  }, {
+    env: {},
+    sleep: async () => {},
+    fetch: async (url) => {
+      fetchCalls.push(url);
+      return url.endsWith("/token")
+        ? jsonResponse({ status: "approved", api_key: "sk-login", token_id: 9, user_id: 7 })
+        : jsonResponse({
+            device_code: "device-code",
+            verification_uri_complete: "https://console.flatkey.ai/cli/authorize",
+            expires_in: 600,
+            interval: 5,
+          });
+    },
+  });
+  assert.equal(fetchCalls[0], "https://console.flatkey.ai/api/cli/device_authorizations");
+});
+
+test("login respects console origin env for test environments", async () => {
   const fetchCalls = [];
   await runCommand({
     group: "login",
@@ -502,14 +559,14 @@ test("login defaults to production console even when console env is set", async 
       return url.endsWith("/token")
         ? jsonResponse({ status: "approved", api_key: "sk-login", token_id: 9, user_id: 7 })
         : jsonResponse({
-          device_code: "device-code",
-          verification_uri_complete: "https://console.flatkey.ai/cli/authorize",
-          expires_in: 600,
-          interval: 5,
-        });
+            device_code: "device-code",
+            verification_uri_complete: "https://staging-console.test/cli/authorize",
+            expires_in: 600,
+            interval: 5,
+          });
     },
   });
-  assert.equal(fetchCalls[0], "https://console.flatkey.ai/api/cli/device_authorizations");
+  assert.equal(fetchCalls[0], "https://staging-console.test/api/cli/device_authorizations");
 });
 
 test("command origins override origin env vars", async () => {
@@ -637,6 +694,96 @@ test("video generation uploads local image references before request", async () 
   ]);
   assert.match(result.artifacts[0].path, /video-01\.mp4$/);
   assert.equal(await readFile(result.artifacts[0].path, "utf8"), "video-bytes");
+});
+
+test("video dry-run preserves mixed media input order", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-video-order-"));
+  const image = join(dir, "a.png");
+  const video = join(dir, "c.mp4");
+  await writeFile(image, "image-bytes");
+  await writeFile(video, "video-bytes");
+
+  const result = await runCommand(parseArgv([
+    "video",
+    "generate",
+    "--prompt",
+    "clip",
+    "--file",
+    image,
+    "--image-url",
+    "https://example.com/b.png",
+    "--file",
+    video,
+    "--video-url",
+    "https://example.com/d.mp4",
+    "--dry-run",
+    "--json",
+  ]), {
+    api_key: "key",
+    base_url: "https://router.test",
+    fetch: async (url, init) => {
+      if (init?.method === "HEAD") {
+        if (url === "https://example.com/b.png") {
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: () => "image/png" },
+          };
+        }
+        if (url === "https://example.com/d.mp4") {
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: () => "video/mp4" },
+          };
+        }
+      }
+      if (url.endsWith("/v1/temp-media/images")) {
+        return jsonResponse({ success: true, data: { signed_url: "https://storage.test/a.png" } });
+      }
+      if (url.endsWith("/v1/temp-media/videos")) {
+        return jsonResponse({ success: true, data: { signed_url: "https://storage.test/c.mp4" } });
+      }
+      return jsonResponse({});
+    },
+  });
+
+  assert.equal(result.dryRun, true);
+  assert.deepEqual(result.request.body.content, [
+    { type: "text", text: "clip" },
+    { type: "image_url", image_url: { url: "https://storage.test/a.png" }, role: "reference_image" },
+    { type: "image_url", image_url: { url: "https://example.com/b.png" }, role: "reference_image" },
+    { type: "video_url", video_url: { url: "https://storage.test/c.mp4" }, role: "reference_video" },
+    { type: "video_url", video_url: { url: "https://example.com/d.mp4" }, role: "reference_video" },
+  ]);
+});
+
+test("rejects more than five reference images in image generate", async () => {
+  await assert.rejects(
+    () => runCommand(parseArgv([
+      "image",
+      "generate",
+      "--prompt",
+      "cover",
+      "--file",
+      "1.png",
+      "--file",
+      "2.png",
+      "--file",
+      "3.png",
+      "--file",
+      "4.png",
+      "--file",
+      "5.png",
+      "--file",
+      "6.png",
+      "--dry-run",
+    ]), {
+      api_key: "key",
+      fetch: async () => jsonResponse({}),
+    }),
+    /maximum 5/,
+  );
 });
 
 test("video generation saves remote result to default output directory", async () => {

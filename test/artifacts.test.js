@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -33,6 +33,23 @@ test("saves data url video artifacts with mime extension", async () => {
 
   assert.match(artifacts[0].path, /video-01\.mp4$/);
   assert.equal(await readFile(artifacts[0].path, "utf8"), "mp4-bytes");
+});
+
+test("continues default video numbering when files already exist", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
+  await writeFile(join(outDir, "video-01.mp4"), "existing-1");
+  await writeFile(join(outDir, "video-02.mp4"), "existing-2");
+
+  const artifacts = await persistArtifacts({
+    kind: "video",
+    response: {
+      data: [{ url: `data:video/mp4;base64,${Buffer.from("mp4-next").toString("base64")}` }],
+    },
+    outDir,
+  });
+
+  assert.match(artifacts[0].path, /video-03\.mp4$/);
+  assert.equal(await readFile(artifacts[0].path, "utf8"), "mp4-next");
 });
 
 test("preserves remote url artifacts without downloading", async () => {

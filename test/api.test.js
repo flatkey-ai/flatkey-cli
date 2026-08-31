@@ -19,6 +19,7 @@ import {
   planVideoRequest,
   pollDeviceAuthorization,
   uploadTempMediaImage,
+  uploadTempMediaVideo,
 } from "../src/api.js";
 
 function fetchRecorder(responseBody = { ok: true }) {
@@ -89,6 +90,43 @@ test("builds OpenAI image request for gpt image models", async () => {
   });
 });
 
+test("builds OpenAI image request with reference images", () => {
+  assert.deepEqual(planImageRequest({
+    apiKey: "key",
+    model: "gpt-image-2",
+    prompt: "cover",
+    __media_inputs: [
+      { name: "file", url: "https://storage.test/a.png", kind: "image" },
+      { name: "image_url", url: "https://storage.test/b.webp", kind: "image" },
+    ],
+  }).body, {
+    model: "gpt-image-2",
+    prompt: "cover",
+    images: ["https://storage.test/a.png", "https://storage.test/b.webp"],
+    response_format: "url",
+    temp_url: true,
+  });
+});
+
+test("rejects more than five reference images", () => {
+  assert.throws(
+    () => planImageRequest({
+      apiKey: "key",
+      model: "gpt-image-2",
+      prompt: "cover",
+      __media_inputs: [
+        { name: "file", url: "https://storage.test/1.png", kind: "image" },
+        { name: "file", url: "https://storage.test/2.png", kind: "image" },
+        { name: "file", url: "https://storage.test/3.png", kind: "image" },
+        { name: "file", url: "https://storage.test/4.png", kind: "image" },
+        { name: "file", url: "https://storage.test/5.png", kind: "image" },
+        { name: "file", url: "https://storage.test/6.png", kind: "image" },
+      ],
+    }),
+    /maximum 5/,
+  );
+});
+
 test("uploads temporary media image with multipart file", async () => {
   const { fetch, calls } = fetchRecorder({
     success: true,
@@ -108,6 +146,28 @@ test("uploads temporary media image with multipart file", async () => {
   assert.equal(calls[0].init.headers.Authorization, "Bearer key");
   assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.equal(calls[0].init.headers["content-type"], undefined);
+  assert.equal(calls[0].init.body instanceof FormData, true);
+});
+
+test("uploads temporary media video with multipart file", async () => {
+  const { fetch, calls } = fetchRecorder({
+    success: true,
+    data: { signed_url: "https://storage.test/video" },
+  });
+
+  await uploadTempMediaVideo({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    filename: "clip.mp4",
+    file: Buffer.from("mp4"),
+    contentType: "video/mp4",
+    fetch,
+  });
+
+  assert.equal(calls[0].url, "https://router.test/v1/temp-media/videos");
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+  assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.equal(calls[0].init.body instanceof FormData, true);
 });
 
@@ -313,6 +373,25 @@ test("builds seedance video request with reference media content", () => {
     generate_audio: true,
     temp_url: true,
   });
+});
+
+test("builds seedance video request with ordered cli media inputs", () => {
+  assert.deepEqual(planVideoRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "seedance2",
+    prompt: "小猫睡觉",
+    __media_inputs: [
+      { name: "file", url: "https://storage.test/a.png", kind: "image", role: "reference_image" },
+      { name: "image_url", url: "https://storage.test/b.webp", kind: "image", role: "reference_image" },
+      { name: "video_url", url: "https://storage.test/ref.mp4", kind: "video", role: "reference_video" },
+    ],
+  }).body.content, [
+    { type: "text", text: "小猫睡觉" },
+    { type: "image_url", image_url: { url: "https://storage.test/a.png" }, role: "reference_image" },
+    { type: "image_url", image_url: { url: "https://storage.test/b.webp" }, role: "reference_image" },
+    { type: "video_url", video_url: { url: "https://storage.test/ref.mp4" }, role: "reference_video" },
+  ]);
 });
 
 test("passes image references to generic video request images", () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -58,16 +58,18 @@ test("runs generation and utility commands in json mode", async (t) => {
   t.after(() => server.close());
   await listen(server);
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const cwd = await mkdtemp(join(tmpdir(), "flatkey-cwd-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
 
   const common = ["--base-url", baseUrl, "--api-key", "test-key", "--json"];
-  const image = await runCli(["image", "generate", "--prompt", "poster", ...common]);
-  const video = await runCli(["video", "generate", "--prompt", "clip", ...common]);
-  const audio = await runCli(["audio", "generate", "--prompt", "voice", ...common]);
-  const text = await runCli(["text", "generate", "--prompt", "headline", ...common]);
-  const credits = await runCli(["credits", ...common]);
-  const status = await runCli(["status", ...common]);
-  const models = await runCli(["models", ...common]);
-  const voices = await runCli(["audio", "voices", ...common]);
+  const image = await runCli(["image", "generate", "--prompt", "poster", ...common], { cwd });
+  const video = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
+  const audio = await runCli(["audio", "generate", "--prompt", "voice", ...common], { cwd });
+  const text = await runCli(["text", "generate", "--prompt", "headline", ...common], { cwd });
+  const credits = await runCli(["credits", ...common], { cwd });
+  const status = await runCli(["status", ...common], { cwd });
+  const models = await runCli(["models", ...common], { cwd });
+  const voices = await runCli(["audio", "voices", ...common], { cwd });
 
   assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ url: "https://cdn.test/image.png" }]);
   assert.match(JSON.parse(video.stdout).artifacts[0].path, /video-01\.mp4$/);
@@ -117,12 +119,14 @@ test("formats command output as human text by default", async (t) => {
   t.after(() => server.close());
   await listen(server);
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const cwd = await mkdtemp(join(tmpdir(), "flatkey-cwd-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
   const common = ["--base-url", baseUrl, "--api-key", "test-key"];
 
-  const models = await runCli(["models", ...common]);
-  const credits = await runCli(["credits", ...common]);
-  const status = await runCli(["status", ...common]);
-  const video = await runCli(["video", "generate", "--prompt", "clip", ...common]);
+  const models = await runCli(["models", ...common], { cwd });
+  const credits = await runCli(["credits", ...common], { cwd });
+  const status = await runCli(["status", ...common], { cwd });
+  const video = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
 
   assert.match(models.stdout, /Available models \(1\):/);
   assert.match(models.stdout, /Model\s+Type\s+Source/);
@@ -142,6 +146,41 @@ test("formats command output as human text by default", async (t) => {
   assert.match(video.stdout, /Video generated:/);
   assert.match(video.stdout, /Saved: .*video-01\.mp4/);
   assert.doesNotMatch(video.stdout, /^\{/);
+});
+
+test("video generation increments default output filenames across runs", async (t) => {
+  const server = createServer((request, response) => {
+    request.on("data", () => {});
+    request.on("end", () => {
+      if (request.url === "/v1/video/generations") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ data: [{ url: `${baseUrl}/video.mp4` }] }));
+      } else if (request.url === "/video.mp4") {
+        response.setHeader("content-type", "video/mp4");
+        response.end("video-file");
+      } else {
+        response.setHeader("content-type", "application/json");
+        response.statusCode = 404;
+        response.end(JSON.stringify({ error: { message: "not found" } }));
+      }
+    });
+  });
+  t.after(() => server.close());
+  await listen(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const cwd = await mkdtemp(join(tmpdir(), "flatkey-cwd-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const common = ["--base-url", baseUrl, "--api-key", "test-key", "--json"];
+
+  const first = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
+  const second = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
+  const firstPath = JSON.parse(first.stdout).artifacts[0].path;
+  const secondPath = JSON.parse(second.stdout).artifacts[0].path;
+
+  assert.match(firstPath, /video-01\.mp4$/);
+  assert.match(secondPath, /video-02\.mp4$/);
+  assert.equal(await readFile(firstPath, "utf8"), "video-file");
+  assert.equal(await readFile(secondPath, "utf8"), "video-file");
 });
 
 test("credits and status normalize missing token API errors", async (t) => {
@@ -367,11 +406,12 @@ function listen(server) {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 }
 
-async function runCli(args) {
+async function runCli(args, options = {}) {
   const home = await mkdtemp(join(tmpdir(), "flatkey-home-"));
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], {
       env: cleanCliEnv(home),
+      cwd: options.cwd,
     });
     let stdout = "";
     let stderr = "";
@@ -392,11 +432,12 @@ async function runCli(args) {
   });
 }
 
-async function runCliAllowFailure(args) {
+async function runCliAllowFailure(args, options = {}) {
   const home = await mkdtemp(join(tmpdir(), "flatkey-home-"));
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args], {
       env: cleanCliEnv(home),
+      cwd: options.cwd,
     });
     let stdout = "";
     let stderr = "";
