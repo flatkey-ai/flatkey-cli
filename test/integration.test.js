@@ -72,10 +72,12 @@ test("runs generation and utility commands in json mode", async (t) => {
   const voices = await runCli(["audio", "voices", ...common], { cwd });
 
   assert.deepEqual(JSON.parse(image.stdout).artifacts, [{ url: "https://cdn.test/image.png" }]);
-  assert.match(JSON.parse(video.stdout).artifacts[0].path, /video-01\.mp4$/);
-  assert.equal(await readFile(JSON.parse(video.stdout).artifacts[0].path, "utf8"), "video-file");
+  const videoPath = join(cwd, JSON.parse(video.stdout).artifacts[0].path);
+  assert.match(videoPath, /video-01\.mp4$/);
+  assert.equal(await readFile(videoPath, "utf8"), "video-file");
   assert.equal(JSON.parse(audio.stdout).artifacts.length, 1);
-  assert.match(JSON.parse(audio.stdout).artifacts[0].path, /audio-01\.mp3$/);
+  const audioPath = join(cwd, JSON.parse(audio.stdout).artifacts[0].path);
+  assert.match(audioPath, /audio-01\.mp3$/);
   assert.equal(JSON.parse(text.stdout).text, "headline");
   assert.equal(JSON.parse(credits.stdout).remaining, 42);
   assert.equal(JSON.parse(status.stdout).status, "ok");
@@ -174,8 +176,8 @@ test("video generation increments default output filenames across runs", async (
 
   const first = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
   const second = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
-  const firstPath = JSON.parse(first.stdout).artifacts[0].path;
-  const secondPath = JSON.parse(second.stdout).artifacts[0].path;
+  const firstPath = join(cwd, JSON.parse(first.stdout).artifacts[0].path);
+  const secondPath = join(cwd, JSON.parse(second.stdout).artifacts[0].path);
 
   assert.match(firstPath, /video-01\.mp4$/);
   assert.match(secondPath, /video-02\.mp4$/);
