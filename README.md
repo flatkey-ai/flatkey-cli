@@ -140,7 +140,29 @@ flatkey video generate \
   -o launch.mp4
 ```
 
-Video ratios: `16:9`, `9:16`, `4:3`, `3:4`, `21:9`, `1:1`.
+### Copy Video
+
+Recreate a local 5-15 second video using a generated Depth Anything V2 video
+reference:
+
+```bash
+flatkey video copy \
+  --source input.mp4 \
+  --frame-ratio 80 \
+  --depth-resolution 480p \
+  -o result.mp4
+```
+
+`video copy` preserves the source duration by default. The source and requested
+duration must be between 5 and 15 seconds. Depth processing uses a platform
+runtime downloaded by the CLI; runtime distribution is configured through
+`FLATKEY_VIDEO_RUNTIME_BASE_URL` until the Flatkey runtime release channel is
+published. The generated depth video is uploaded as the primary motion
+reference. If the selected upstream model cannot fetch video references, the
+CLI explicitly falls back to three depth keyframes and reports that mode in
+JSON output as `depth-keyframes-fallback`.
+
+Video ratios: `16:9`, `9:16`, `4:3`, `3:4`, `21:9`, `1:1`, `adaptive`.
 Video resolutions: `480p`, `720p`, `1080p`.
 
 Local reference images are uploaded through Flatkey temporary media first:
@@ -152,6 +174,22 @@ flatkey video generate \
   --image ./reference.png \
   -o kitten.mp4
 ```
+
+Seedance 2.5 accepts reference images and videos as ordered content inputs:
+
+```bash
+flatkey video generate \
+  --model seedance-2-5-pro \
+  --prompt "保持人物、服装和镜头运动一致" \
+  --image-url https://example.com/character.png \
+  --video-url https://example.com/motion.mp4 \
+  --ratio adaptive \
+  -o result.mp4
+```
+
+For Seedance 2.5, the CLI allows up to 30 reference images and 10 reference
+videos in one request. Local files are uploaded before generation and all
+inputs keep their command-line order. Reference videos can be `.mp4` or `.mov`.
 
 First/last frame:
 

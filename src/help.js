@@ -16,6 +16,7 @@ JSON mode:
 Commands:
 - flatkey image generate --prompt "<prompt>" --json [--model <model>] [--file <path>] [--image-url <url>] [--output image.png]
 - flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--file <path>] [--image-url <url>] [--video-url <url>] [--ratio 16:9] [--resolution 720p] [--output video.mp4]
+- flatkey video copy --source input.mp4 --json [--model seedance2] [--frame-ratio 80] [--depth-resolution 480p] [--output video.mp4]
 - flatkey audio generate --prompt "<text>" --json [--voice-id <voice_id>] [--model eleven_multilingual_v2] [--output speech.mp3]
 - flatkey audio sfx --prompt "<sound>" --json [--duration <seconds>] [--output sfx.mp3]
 - flatkey audio music --prompt "<music prompt>" --json [--music-length-ms <ms>] [--output music.mp3]
@@ -54,6 +55,7 @@ Commands:
   image generate --prompt <txt>  Generate image
   image upload --file <path>     Upload local image and return a temporary URL
   video generate --prompt <txt>  Generate video
+  video copy --source <mp4>       Recreate a 5-15s video from Depth Anything V2 motion
   audio generate --prompt <txt>  Generate speech with ElevenLabs voices
   audio sfx --prompt <txt>       Generate sound effects
   audio music --prompt <txt>     Generate music
@@ -79,7 +81,7 @@ Environment:
   --console-url <url>            Override Flatkey console URL for login
 
 Video options:
-  --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
+  --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, 1:1, or adaptive
   --resolution <value>            480p, 720p, or 1080p
 `;
 }
@@ -216,22 +218,34 @@ Aliases:
 
 Options:
   --json                         Print machine-readable JSON`,
-  video: `Usage: flatkey video generate --prompt <txt> [options]
+  video: `Usage: flatkey video <command> [options]
+
+Commands:
+  generate --prompt <txt>        Generate video
+  copy --source <mp4>            Recreate a 5-15s video from local depth motion
 
 Options:
   --model <model>                Model id, default seedance-2.0-pro
   --duration <seconds>            Video duration
+  --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, 1:1, or adaptive
+  --resolution <value>            480p, 720p, or 1080p
+  --generate-audio <true|false>   Generate audio, default true
+  --output, -o <file>             Write video file
+  --json                         Print machine-readable JSON`,
+  "video copy": `Usage: flatkey video copy --source <mp4> [options]
+
+Options:
+  --source <mp4>                  Local source video, must be 5-15 seconds
+  --frame-ratio <20..100>         Percent of frames kept for depth, default 100
+  --depth-resolution <value>      original, 480p, or 320p; default 480p
+  --depth-location <dir>          Directory for temporary depth video files
+  --keep-depth                    Keep generated depth video and reference frames
+  --model <model>                Model id, default seedance-2.0-pro
+  --prompt <txt>                 Prompt override for copy generation
+  --duration <seconds>            Must match source duration, 5-15 seconds
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
   --resolution <value>            480p, 720p, or 1080p
   --generate-audio <true|false>   Generate audio, default true
-  --image <file>                  Upload local reference image, repeatable
-  --image-url <url>               Add reference image URL, repeatable
-  --file <path>                   Local image or video input, repeatable
-  --first-frame <file>            Upload local first frame image
-  --video-url <url>               Add reference video URL, repeatable
-  --first-frame-url <url>         Add first frame image URL
-  --last-frame <file>             Upload local last frame image
-  --last-frame-url <url>          Add last frame image URL
   --fps <fps>                    Frames per second
   --output, -o <file>             Write video file
   --json                         Print machine-readable JSON`,
@@ -247,7 +261,7 @@ Options:
   --image-url <url>               Add reference image URL, repeatable
   --file <path>                   Local image or video input, repeatable
   --first-frame <file>            Upload local first frame image
-  --video-url <url>               Add reference video URL, repeatable
+  --video-url <url>               Add reference video URL, repeatable; Seedance 2.5 supports up to 10
   --first-frame-url <url>         Add first frame image URL
   --last-frame <file>             Upload local last frame image
   --last-frame-url <url>          Add last frame image URL

@@ -44,6 +44,7 @@ const COMMAND_OPTIONS = {
   version: new Set([]),
   video: new Set([]),
   "video generate": new Set(["aspect", "duration", "file", "first_frame", "first_frame_url", "fps", "generate_audio", "image", "image_url", "last_frame", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
+  "video copy": new Set(["aspect", "depth_location", "depth_model", "depth_resolution", "duration", "fps", "frame_ratio", "generate_audio", "keep_depth", "model", "prompt", "ratio", "resolution", "source"]),
 };
 
 export function parseArgv(argv) {
@@ -151,6 +152,9 @@ function repeatableOptionsFor(group, action) {
   if (group === "video" && action === "generate") {
     return new Set([...REPEATABLE_OPTIONS, "file"]);
   }
+  if (group === "video" && action === "copy") {
+    return REPEATABLE_OPTIONS;
+  }
   return REPEATABLE_OPTIONS;
 }
 
@@ -249,7 +253,9 @@ export async function runCommand(command, deps = {}) {
       ? ["generate", "sfx", "music"].includes(command.action)
       : command.group === "image"
         ? ["generate", "upload"].includes(command.action)
-        : command.action === "generate";
+        : command.group === "video"
+          ? ["generate", "copy"].includes(command.action)
+          : command.action === "generate";
     if (!validAction) {
       throw new Error(`Unknown action for ${command.group}: ${command.action}`);
     }
@@ -515,6 +521,7 @@ async function handleGenerate(command, deps) {
     uploadTempMediaVideo,
   } = await import("./api.js");
   const { createAnimation } = await import("./animation.js");
+  const { prepareVideoCopy } = await import("./video-copy.js");
   const apiKey = command.options.dry_run
     ? (command.options.api_key ?? "FLATKEY_API_KEY")
     : await resolveApiKey({
@@ -545,17 +552,43 @@ async function handleGenerate(command, deps) {
   if (Array.isArray(command.options.__media_inputs)) {
     options.__media_inputs = command.options.__media_inputs;
   }
+  let videoCopy;
+  if (command.group === "video" && command.action === "copy") {
+    if (!command.options.source) {
+      throw new Error("Missing --source value. Run `flatkey video copy --help` to see supported options.");
+    }
+    videoCopy = await (deps.prepareVideoCopy ?? prepareVideoCopy)(command.options, deps);
+    options.prompt ??= "Recreate the reference video as faithfully as possible while following the supplied depth motion.";
+    options.duration = videoCopy.duration;
+    options.__media_inputs = [{
+      name: "depth_video",
+      value: videoCopy.depthPath,
+      kind: "local",
+      optionName: "file",
+      role: "reference_video",
+    }];
+    options.__copy_reference_mode = "depth-video";
+  }
   if (command.group === "image" || command.group === "video") {
-    await prepareMediaInputs(command, options, {
-      apiKey,
-      baseUrl: options.baseUrl,
-      tempMediaBaseUrl: tempMediaBaseUrl ?? DEFAULT_CONSOLE_URL,
-      fetch: deps.fetch,
-      verbose: command.options.verbose,
-      verboseLog: verboseLogger(deps.stderr, command.options.verbose),
-      uploadTempMediaImage,
-      uploadTempMediaVideo,
-    });
+    try {
+      await prepareMediaInputs(command, options, {
+        apiKey,
+        baseUrl: options.baseUrl,
+        tempMediaBaseUrl: tempMediaBaseUrl ?? DEFAULT_CONSOLE_URL,
+        fetch: deps.fetch,
+        verbose: command.options.verbose,
+        verboseLog: verboseLogger(deps.stderr, command.options.verbose),
+        uploadTempMediaImage,
+        uploadTempMediaVideo,
+      });
+    } catch (error) {
+      await videoCopy?.cleanup?.();
+      throw error;
+    }
+  }
+  if (command.group === "video" && command.action === "copy"
+    && !options.__media_inputs?.some((entry) => entry.kind === "video")) {
+    throw new Error("Video copy failed to prepare its depth-video reference.");
   }
   if (command.options.dry_run) {
     const request = command.group === "image"
@@ -569,7 +602,14 @@ async function handleGenerate(command, deps) {
               ? planAudioMusicRequest(options)
               : planAudioRequest(options)
           : planTextRequest(options);
-    return { dryRun: true, kind: command.group, request: redactRequest(request) };
+    await videoCopy?.cleanup?.();
+    return {
+      dryRun: true,
+      kind: command.group,
+      request: redactRequest(request),
+      videoCopy: scrubVideoCopy(videoCopy),
+      copyReferenceMode: options.__copy_reference_mode,
+    };
   }
   const animation = createAnimation({
     json: Boolean(command.options.json),
@@ -577,20 +617,52 @@ async function handleGenerate(command, deps) {
   });
   animation.start(command.group);
   try {
-    const response = command.group === "image"
-      ? await generateImage(options)
-      : command.group === "video"
-        ? await generateVideo(options)
-        : command.group === "audio"
-          ? command.action === "sfx"
-            ? await generateAudioSfx(options)
-            : command.action === "music"
-              ? await generateAudioMusic(options)
-              : await generateAudio(options)
-          : await generateText(options);
-    const artifactResponse = command.group === "video"
-      ? await waitForVideoResult(response, { ...options, getVideo, sleep: deps.sleep })
-      : response;
+    let response;
+    try {
+      response = command.group === "image"
+        ? await generateImage(options)
+        : command.group === "video"
+          ? await generateVideo(options)
+          : command.group === "audio"
+            ? command.action === "sfx"
+              ? await generateAudioSfx(options)
+              : command.action === "music"
+                ? await generateAudioMusic(options)
+                : await generateAudio(options)
+            : await generateText(options);
+      response = command.group === "video"
+        ? await waitForVideoResult(response, { ...options, getVideo, sleep: deps.sleep })
+        : response;
+    } catch (error) {
+      if (!videoCopy || options.__copy_reference_mode !== "depth-video" || !isDepthVideoFetchFailure(error)) {
+        throw error;
+      }
+      options.__media_inputs = (videoCopy.referencePaths ?? []).map((value, index) => ({
+        name: `depth_frame_${String(index + 1).padStart(2, "0")}`,
+        value,
+        kind: "local",
+        optionName: "image",
+        role: index === 0
+          ? "first_frame"
+          : index === (videoCopy.referencePaths.length - 1)
+            ? "last_frame"
+            : "reference_image",
+      }));
+      await prepareMediaInputs(command, options, {
+        apiKey,
+        baseUrl: options.baseUrl,
+        tempMediaBaseUrl: tempMediaBaseUrl ?? DEFAULT_CONSOLE_URL,
+        fetch: deps.fetch,
+        verbose: command.options.verbose,
+        verboseLog: verboseLogger(deps.stderr, command.options.verbose),
+        uploadTempMediaImage,
+        uploadTempMediaVideo,
+      });
+      options.__copy_reference_mode = "depth-keyframes-fallback";
+      response = await generateVideo(options);
+      response = await waitForVideoResult(response, { ...options, getVideo, sleep: deps.sleep });
+    }
+    const artifactResponse = response;
     if (command.group === "text") {
       const text = extractText(response);
       const output = await writeTextOutput(text, command.options.output);
@@ -606,21 +678,27 @@ async function handleGenerate(command, deps) {
       output,
       fetch: deps.fetch,
     });
-    return { kind: command.group, artifacts, response: scrubArtifactResponse(artifactResponse) };
+    return {
+      kind: command.group,
+      artifacts,
+      response: scrubArtifactResponse(artifactResponse),
+      ...(videoCopy ? { copyReferenceMode: options.__copy_reference_mode } : {}),
+    };
   } finally {
     animation.stop();
+    await videoCopy?.cleanup?.();
   }
 }
 
 async function prepareMediaInputs(command, options, deps) {
   const mediaInputs = orderedMediaInputs(command, options);
   if (mediaInputs.length === 0) return;
-  assertMediaReferenceLimit(mediaInputs, command.group);
+  assertMediaReferenceLimit(mediaInputs, command.group, options.model);
 
   const resolved = [];
   for (const input of mediaInputs) {
     if (input.kind === "local") {
-      resolved.push(await uploadLocalMedia(input.value, command.group, deps, input.name));
+      resolved.push(await uploadLocalMedia(input.value, command.group, deps, input.optionName ?? input.name));
     } else {
       resolved.push(await confirmRemoteMediaUrl(input.value, command.group, deps, input.name));
     }
@@ -628,10 +706,25 @@ async function prepareMediaInputs(command, options, deps) {
   options.__media_inputs = resolved;
 }
 
-function assertMediaReferenceLimit(mediaInputs, commandGroup) {
+function assertMediaReferenceLimit(mediaInputs, commandGroup, model) {
   const imageInputs = mediaInputs.filter((entry) => entry.kind !== "video");
-  if (imageInputs.length <= MAX_REFERENCE_IMAGES) return;
-  throw new Error(`Too many reference images for flatkey ${commandGroup} generate: maximum ${MAX_REFERENCE_IMAGES}.`);
+  const videoInputs = mediaInputs.filter((entry) => entry.kind === "video");
+  if (isSeedance25Model(model)) {
+    if (imageInputs.length > 30) {
+      throw new Error(`Too many reference images for flatkey ${commandGroup} generate with Seedance 2.5: maximum 30.`);
+    }
+    if (videoInputs.length > 10) {
+      throw new Error(`Too many reference videos for flatkey ${commandGroup} generate with Seedance 2.5: maximum 10.`);
+    }
+    return;
+  }
+  if (imageInputs.length > MAX_REFERENCE_IMAGES) {
+    throw new Error(`Too many reference images for flatkey ${commandGroup} generate: maximum ${MAX_REFERENCE_IMAGES}.`);
+  }
+}
+
+function isSeedance25Model(model) {
+  return String(model ?? "").toLowerCase().replaceAll(/[-_.]/g, "").includes("seedance25");
 }
 
 function orderedMediaInputs(command, options) {
@@ -730,6 +823,12 @@ function mediaInfoFromPath(file) {
   if (lower.endsWith(".png")) return { kind: "image", contentType: "image/png" };
   if (lower.endsWith(".webp")) return { kind: "image", contentType: "image/webp" };
   if (lower.endsWith(".mp4")) return { kind: "video", contentType: "video/mp4" };
+  if (lower.endsWith(".mov")) return { kind: "video", contentType: "video/quicktime" };
+  if (lower.endsWith(".bmp")) return { kind: "image", contentType: "image/bmp" };
+  if (lower.endsWith(".tif") || lower.endsWith(".tiff")) return { kind: "image", contentType: "image/tiff" };
+  if (lower.endsWith(".gif")) return { kind: "image", contentType: "image/gif" };
+  if (lower.endsWith(".heic")) return { kind: "image", contentType: "image/heic" };
+  if (lower.endsWith(".heif")) return { kind: "image", contentType: "image/heif" };
   return undefined;
 }
 
@@ -740,6 +839,12 @@ function mediaInfoFromMime(contentType) {
   if (lower.startsWith("image/png")) return { kind: "image", contentType: "image/png" };
   if (lower.startsWith("image/webp")) return { kind: "image", contentType: "image/webp" };
   if (lower.startsWith("video/mp4")) return { kind: "video", contentType: "video/mp4" };
+  if (lower.startsWith("video/quicktime")) return { kind: "video", contentType: "video/quicktime" };
+  if (lower.startsWith("image/bmp")) return { kind: "image", contentType: "image/bmp" };
+  if (lower.startsWith("image/tiff")) return { kind: "image", contentType: "image/tiff" };
+  if (lower.startsWith("image/gif")) return { kind: "image", contentType: "image/gif" };
+  if (lower.startsWith("image/heic")) return { kind: "image", contentType: "image/heic" };
+  if (lower.startsWith("image/heif")) return { kind: "image", contentType: "image/heif" };
   return undefined;
 }
 
@@ -862,6 +967,29 @@ function scrubArtifactResponse(value) {
       return [key, scrubArtifactResponse(entry)];
     }),
   );
+}
+
+function scrubVideoCopy(value) {
+  if (!value) return undefined;
+  return {
+    source: value.source,
+    depthPath: value.depthPath,
+    referencePaths: value.referencePaths,
+    duration: value.duration,
+    sourceInfo: value.sourceInfo,
+    helper: value.helper,
+  };
+}
+
+function isDepthVideoFetchFailure(error) {
+  const code = String(error?.code ?? "").toLowerCase();
+  const message = String(error?.message ?? error).toLowerCase();
+  return code.includes("fail_to_fetch")
+    || code.includes("video_fetch")
+    || message.includes("fail_to_fetch")
+    || message.includes("failed to fetch")
+    || message.includes("unable to fetch")
+    || message.includes("video reference");
 }
 
 async function handleVoices(command, deps) {

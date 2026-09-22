@@ -323,7 +323,7 @@ test("builds seedance2 video generation request", async () => {
     fetch,
   });
 
-  assert.equal(calls[0].url, "https://router.test/v1/video/generations");
+  assert.equal(calls[0].url, "https://router.test/v1/videos");
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     model: "seedance2",
     prompt: "newsroom b-roll",
@@ -350,7 +350,7 @@ test("builds seedance video request with official content payload", () => {
 });
 
 test("builds seedance video request with reference media content", () => {
-  assert.deepEqual(planVideoRequest({
+  const request = planVideoRequest({
     apiKey: "key",
     baseUrl: "https://router.test",
     model: "seedance-2.0-pro",
@@ -359,7 +359,9 @@ test("builds seedance video request with reference media content", () => {
     video_url: ["https://example.com/ref.mp4"],
     first_frame_url: "https://example.com/first.png",
     last_frame_url: "https://example.com/last.png",
-  }).body, {
+  });
+  assert.equal(request.url, "https://router.test/v1/videos");
+  assert.deepEqual(request.body, {
     model: "seedance-2.0-pro",
     prompt: "小猫睡觉",
     content: [
@@ -376,7 +378,7 @@ test("builds seedance video request with reference media content", () => {
 });
 
 test("builds seedance video request with ordered cli media inputs", () => {
-  assert.deepEqual(planVideoRequest({
+  const request = planVideoRequest({
     apiKey: "key",
     baseUrl: "https://router.test",
     model: "seedance2",
@@ -386,12 +388,68 @@ test("builds seedance video request with ordered cli media inputs", () => {
       { name: "image_url", url: "https://storage.test/b.webp", kind: "image", role: "reference_image" },
       { name: "video_url", url: "https://storage.test/ref.mp4", kind: "video", role: "reference_video" },
     ],
-  }).body.content, [
+  });
+  assert.equal(request.url, "https://router.test/v1/videos");
+  assert.deepEqual(request.body.content, [
     { type: "text", text: "小猫睡觉" },
     { type: "image_url", image_url: { url: "https://storage.test/a.png" }, role: "reference_image" },
     { type: "image_url", image_url: { url: "https://storage.test/b.webp" }, role: "reference_image" },
     { type: "video_url", video_url: { url: "https://storage.test/ref.mp4" }, role: "reference_video" },
   ]);
+});
+
+test("builds Seedance 2.5 reference media request with adaptive ratio", () => {
+  const request = planVideoRequest({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "seedance-2-5-pro",
+    prompt: "保持人物动作和镜头运动",
+    ratio: "adaptive",
+    image_url: ["https://example.com/a.png"],
+    video_url: ["https://example.com/ref.mp4"],
+  });
+
+  assert.equal(request.url, "https://router.test/v1/videos");
+  assert.equal(request.body.ratio, "adaptive");
+  assert.equal(request.body.duration, -1);
+  assert.equal(request.body.omni_reference_task_type, "auto");
+  assert.deepEqual(request.body.content, [
+    { type: "text", text: "保持人物动作和镜头运动" },
+    { type: "image_url", image_url: { url: "https://example.com/a.png" }, role: "reference_image" },
+    { type: "video_url", video_url: { url: "https://example.com/ref.mp4" }, role: "reference_video" },
+  ]);
+});
+
+test("Seedance 2.5 allows expanded image and video reference counts", () => {
+  const imageUrls = Array.from({ length: 30 }, (_, index) => `https://example.com/${index}.png`);
+  const videoUrls = Array.from({ length: 10 }, (_, index) => `https://example.com/${index}.mp4`);
+  const body = planVideoRequest({
+    apiKey: "key",
+    model: "doubao-seedance-2-5-pro",
+    prompt: "clip",
+    image_url: imageUrls,
+    video_url: videoUrls,
+  }).body;
+
+  assert.equal(body.content.length, 41);
+  assert.throws(
+    () => planVideoRequest({
+      apiKey: "key",
+      model: "seedance-2.5-pro",
+      prompt: "clip",
+      image_url: [...imageUrls, "https://example.com/extra.png"],
+    }),
+    /maximum 30/,
+  );
+  assert.throws(
+    () => planVideoRequest({
+      apiKey: "key",
+      model: "seedance-2.5-pro",
+      prompt: "clip",
+      video_url: [...videoUrls, "https://example.com/extra.mp4"],
+    }),
+    /maximum 10/,
+  );
 });
 
 test("passes image references to generic video request images", () => {

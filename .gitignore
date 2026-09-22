@@ -1,1 +1,2 @@
 flatkey-output/
+rust/**/target/

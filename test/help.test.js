@@ -10,6 +10,7 @@ test("ai help teaches agents setup and command usage", () => {
   assert.match(help, /flatkey onboard --api-key/);
   assert.match(help, /flatkey image generate/);
   assert.match(help, /flatkey video generate/);
+  assert.match(help, /flatkey video copy/);
   assert.match(help, /flatkey audio generate/);
   assert.match(help, /flatkey audio sfx/);
   assert.match(help, /flatkey audio music/);
@@ -39,6 +40,7 @@ test("command help covers each command and action", () => {
     "image generate",
     "video",
     "video generate",
+    "video copy",
     "audio",
     "audio generate",
     "audio sfx",
@@ -56,4 +58,6 @@ test("command help covers each command and action", () => {
   }
   assert.match(getCommandHelp("video", "generate"), /--resolution/);
   assert.match(getCommandHelp("video", "generate"), /--generate-audio/);
+  assert.match(getCommandHelp("video", "copy"), /--frame-ratio/);
+  assert.match(getCommandHelp("video", "copy"), /--depth-resolution/);
 });

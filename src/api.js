@@ -5,10 +5,11 @@ export const DEFAULT_MODELS_BASE_URL = "https://console.flatkey.ai";
 export const DEFAULT_CONSOLE_URL = "https://console.flatkey.ai";
 
 export class FlatkeyError extends Error {
-  constructor(message, { status } = {}) {
+  constructor(message, { status, code } = {}) {
     super(message);
     this.name = "FlatkeyError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -39,7 +40,7 @@ async function uploadTempMediaByKind(options, kind) {
 export function planImageRequest(options) {
   const model = options.model ?? "nano-banana-pro-preview";
   const mediaInputs = orderedMediaInputs(options);
-  assertReferenceImageLimit(mediaInputs, "image");
+  assertReferenceLimits(mediaInputs, "image", model);
   if (mediaInputs.some((entry) => entry.kind === "video")) {
     throw new Error("Image models only accept image inputs.");
   }
@@ -90,7 +91,7 @@ export function getVideo(options, taskId) {
 export function planVideoRequest(options) {
   const model = options.model ?? "seedance-2.0-pro";
   const mediaInputs = orderedMediaInputs(options);
-  assertReferenceImageLimit(mediaInputs, "video");
+  assertReferenceLimits(mediaInputs, "video", model);
   if (mediaInputs.some((entry) => entry.role === "first_frame" && entry.kind === "video")
     || mediaInputs.some((entry) => entry.role === "last_frame" && entry.kind === "video")) {
     throw new Error("Video first-frame and last-frame inputs must be images.");
@@ -98,9 +99,13 @@ export function planVideoRequest(options) {
   const imageUrls = mediaInputs
     .filter((entry) => entry.kind !== "video")
     .map((entry) => entry.url);
+  const videoUrls = mediaInputs
+    .filter((entry) => entry.kind === "video")
+    .map((entry) => entry.url);
   const ratio = validateOptionalValue(
-    optionValue(options, "ratio", "aspect") ?? (isMiniMaxModel(model) ? "16:9" : undefined),
-    ["16:9", "9:16", "4:3", "3:4", "21:9", "1:1"],
+    optionValue(options, "ratio", "aspect")
+      ?? (isMiniMaxModel(model) ? "16:9" : isSeedance25Model(model) ? "adaptive" : undefined),
+    ["16:9", "9:16", "4:3", "3:4", "21:9", "1:1", "adaptive"],
     "ratio",
   );
   const resolution = validateOptionalValue(
@@ -113,19 +118,24 @@ export function planVideoRequest(options) {
     prompt: options.prompt,
     duration: options.duration === undefined && isMiniMaxModel(model)
       ? 5
-      : parseOptionalInteger(options.duration),
+      : options.duration === undefined && isSeedance25Model(model)
+        ? -1
+      : parseOptionalFloat(options.duration),
     aspect: ratio,
     ratio,
     resolution,
     quality: resolution,
     fps: parseOptionalInteger(options.fps),
     generate_audio: parseOptionalBoolean(options.generate_audio) ?? true,
+    omni_reference_task_type: isSeedance25Model(model) && mediaInputs.some((entry) => entry.kind === "video" || entry.role === "reference_image")
+      ? "auto"
+      : undefined,
     temp_url: true,
     images: !isSeedanceModel(model) && imageUrls.length > 0 ? imageUrls : undefined,
   });
   const seedanceContent = buildSeedanceContent(options, mediaInputs);
   if ((isSeedanceModel(model) || isMiniMaxModel(model)) && seedanceContent.length > 0) {
-    return planJsonPost(options, "/v1/video/generations", cleanObject({
+    return planJsonPost(options, videoGenerationPath(model, videoUrls), cleanObject({
       ...basePayload,
       content: seedanceContent,
     }));
@@ -282,6 +292,7 @@ async function requestJsonFromPlan(options, plan) {
   if (!response.ok || body?.success === false) {
     throw new FlatkeyError(extractErrorMessage(body, response.status), {
       status: response.status,
+      code: body?.code ?? body?.error?.code,
     });
   }
   return body;
@@ -306,6 +317,7 @@ async function requestBinaryArtifactFromPlan(options, plan) {
     logResponseBody(options, body);
     throw new FlatkeyError(extractErrorMessage(body, response.status), {
       status: response.status,
+      code: body?.code ?? body?.error?.code,
     });
   }
   return {
@@ -414,6 +426,13 @@ function isMiniMaxModel(model) {
   return /^minimax-h3$/i.test(model);
 }
 
+function videoGenerationPath(model, videoUrls = []) {
+  // Seedance keeps text, image, and video-reference content on /v1/videos.
+  // The legacy route does not reliably fetch video references upstream.
+  if (isSeedanceModel(model)) return "/v1/videos";
+  return "/v1/video/generations";
+}
+
 function buildSeedanceContent(options, mediaInputs = orderedMediaInputs(options)) {
   const content = [];
   if (options.prompt !== undefined) {
@@ -440,10 +459,21 @@ function cleanObject(value) {
   );
 }
 
-function assertReferenceImageLimit(mediaInputs, kind) {
+function assertReferenceLimits(mediaInputs, kind, model) {
   const imageInputs = mediaInputs.filter((entry) => entry.kind !== "video");
-  if (imageInputs.length <= 5) return;
-  throw new Error(`Too many reference images for flatkey ${kind} generate: maximum 5.`);
+  const videoInputs = mediaInputs.filter((entry) => entry.kind === "video");
+  if (isSeedance25Model(model)) {
+    if (imageInputs.length > 30) {
+      throw new Error(`Too many reference images for flatkey ${kind} generate with Seedance 2.5: maximum 30.`);
+    }
+    if (videoInputs.length > 10) {
+      throw new Error(`Too many reference videos for flatkey ${kind} generate with Seedance 2.5: maximum 10.`);
+    }
+    return;
+  }
+  if (imageInputs.length > 5) {
+    throw new Error(`Too many reference images for flatkey ${kind} generate: maximum 5.`);
+  }
 }
 
 function orderedMediaInputs(options) {
@@ -479,8 +509,12 @@ function orderedMediaInputs(options) {
 function inferMediaKindFromName(name, value) {
   const lowerName = String(name ?? "").toLowerCase();
   if (lowerName.includes("video")) return "video";
-  if (typeof value === "string" && value.toLowerCase().endsWith(".mp4")) return "video";
+  if (typeof value === "string" && /\.(mp4|mov)$/i.test(value)) return "video";
   return "image";
+}
+
+function isSeedance25Model(model) {
+  return String(model ?? "").toLowerCase().replaceAll(/[-_.]/g, "").includes("seedance25");
 }
 
 async function readJson(response) {

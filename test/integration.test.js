@@ -20,7 +20,7 @@ test("runs generation and utility commands in json mode", async (t) => {
       if (request.url.startsWith("/v1beta/models/")) {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ data: [{ url: "https://cdn.test/image.png" }] }));
-      } else if (request.url === "/v1/video/generations") {
+      } else if (request.url === "/v1/videos") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ data: [{ url: `${baseUrl}/video.mp4` }] }));
       } else if (request.url === "/video.mp4") {
@@ -91,7 +91,7 @@ test("runs generation and utility commands in json mode", async (t) => {
   assert.deepEqual(JSON.parse(voices.stdout).voices, [{ voice_id: "voice-123", name: "Rachel" }]);
   assert.equal(image.stderr, "");
   assert.ok(requests.some((request) => request.url.startsWith("/v1beta/models/")));
-  assert.ok(requests.some((request) => request.url === "/v1/video/generations"));
+  assert.ok(requests.some((request) => request.url === "/v1/videos"));
   assert.ok(requests.some((request) => request.url === "/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL"));
   assert.ok(requests.some((request) => request.url === "/v1/chat/completions"));
 });
@@ -107,7 +107,7 @@ test("formats command output as human text by default", async (t) => {
         response.end(JSON.stringify({ remaining: 8, used: 92 }));
       } else if (request.url === "/v1/status") {
         response.end(JSON.stringify({ status: "ok", remaining: 42, email: "test@example.com", name: "Test User" }));
-      } else if (request.url === "/v1/video/generations") {
+      } else if (request.url === "/v1/videos") {
         response.end(JSON.stringify({ data: [{ url: `${baseUrl}/video.mp4` }] }));
       } else if (request.url === "/video.mp4") {
         response.setHeader("content-type", "video/mp4");
@@ -154,7 +154,7 @@ test("video generation increments default output filenames across runs", async (
   const server = createServer((request, response) => {
     request.on("data", () => {});
     request.on("end", () => {
-      if (request.url === "/v1/video/generations") {
+      if (request.url === "/v1/videos") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ data: [{ url: `${baseUrl}/video.mp4` }] }));
       } else if (request.url === "/video.mp4") {
@@ -224,7 +224,7 @@ test("dry-run returns planned request without calling network", async () => {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.dryRun, true);
   assert.equal(payload.kind, "video");
-  assert.equal(payload.request.url, "https://router.flatkey.ai/v1/video/generations");
+  assert.equal(payload.request.url, "https://router.flatkey.ai/v1/videos");
   assert.equal(payload.request.body.ratio, "21:9");
   assert.equal(payload.request.body.aspect, "21:9");
   assert.equal(payload.request.body.resolution, "1080p");
@@ -301,7 +301,7 @@ test("generation commands write explicit output files", async (t) => {
       } else if (request.url === "/v1/chat/completions") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ choices: [{ message: { content: "text-file" } }] }));
-      } else if (request.url === "/v1/video/generations") {
+      } else if (request.url === "/v1/videos") {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ id: "task_123", object: "video", status: "queued" }));
       } else if (request.url === "/v1/videos/task_123") {

@@ -1,6 +1,6 @@
 {
   "name": "@flatkey-ai/cli",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Flatkey media generation CLI for image, video, audio, credits, status, and models.",
   "type": "module",
   "bin": {
@@ -8,9 +8,11 @@
   },
   "files": [
     "bin",
-    "src"
+    "src",
+    "scripts"
   ],
   "scripts": {
+    "postinstall": "node scripts/install-video-runtime.js",
     "test": "node --test"
   },
   "engines": {

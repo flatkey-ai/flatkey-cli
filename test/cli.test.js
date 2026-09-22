@@ -67,6 +67,42 @@ test("parses output aliases", () => {
   );
 });
 
+test("parses video copy options", () => {
+  const command = parseArgv([
+    "video",
+    "copy",
+    "--source",
+    "input.mp4",
+    "--frame-ratio",
+    "80",
+    "--depth-resolution",
+    "320p",
+    "--depth-location",
+    "/tmp/flatkey-depth",
+    "--keep-depth",
+    "--duration",
+    "8",
+    "-o",
+    "result.mp4",
+    "--json",
+  ]);
+
+  assert.deepEqual(command, {
+    group: "video",
+    action: "copy",
+    options: {
+      source: "input.mp4",
+      frame_ratio: "80",
+      depth_resolution: "320p",
+      depth_location: "/tmp/flatkey-depth",
+      keep_depth: true,
+      duration: "8",
+      output: "result.mp4",
+      json: true,
+    },
+  });
+});
+
 test("parses repeatable file and media url inputs", () => {
   const image = parseArgv([
     "image",
@@ -422,7 +458,7 @@ test("origin env vars switch router and console APIs", async () => {
       CONSOLE_ORIGIN: "https://staging-console.test",
     },
   });
-  assert.equal(video.request.url, "https://staging-router.test/v1/video/generations");
+  assert.equal(video.request.url, "https://staging-router.test/v1/videos");
 
   const fetchCalls = [];
   await runCommand({
@@ -682,11 +718,11 @@ test("video generation uploads local image references before request", async () 
     },
   });
 
-  const videoCall = calls.find((call) => call.url.endsWith("/v1/video/generations"));
+  const videoCall = calls.find((call) => call.url.endsWith("/v1/videos"));
   const uploadCall = calls.find((call) => call.url.endsWith("/v1/temp-media/images"));
   assert.equal(uploadCall?.url, "https://console.flatkey.ai/v1/temp-media/images");
   assert.equal(uploadCall?.init.body.get("file").type, "image/png");
-  assert.equal(videoCall?.url, "https://router.test/v1/video/generations");
+  assert.equal(videoCall?.url, "https://router.test/v1/videos");
   assert.ok(videoCall);
   assert.deepEqual(JSON.parse(videoCall.init.body).content, [
     { type: "text", text: "clip" },
@@ -694,6 +730,137 @@ test("video generation uploads local image references before request", async () 
   ]);
   assert.match(result.artifacts[0].path, /video-01\.mp4$/);
   assert.equal(await readFile(result.artifacts[0].path, "utf8"), "video-bytes");
+});
+
+test("video copy uploads the generated depth video as the primary reference", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-video-copy-"));
+  const depth = join(dir, "depth.mp4");
+  await writeFile(depth, "depth-video-bytes");
+  const calls = [];
+  let cleaned = false;
+
+  const result = await runCommand({
+    group: "video",
+    action: "copy",
+    options: {
+      source: join(dir, "input.mp4"),
+      frame_ratio: "80",
+      depth_resolution: "480p",
+      api_key: "key",
+      base_url: "https://router.test",
+      out: dir,
+      json: true,
+    },
+  }, {
+    prepareVideoCopy: async () => ({
+      source: join(dir, "input.mp4"),
+      depthPath: depth,
+      referencePaths: [],
+      duration: 8.25,
+      sourceInfo: { duration: 8.25, width: 1280, height: 720 },
+      helper: { output: depth },
+      cleanup: async () => { cleaned = true; },
+    }),
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/v1/temp-media/videos")) {
+        return jsonResponse({ success: true, data: { signed_url: "https://storage.test/depth.mp4" } });
+      }
+      if (url === "https://cdn.test/result.mp4") {
+        return {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return Buffer.from("result-video-bytes");
+          },
+        };
+      }
+      return jsonResponse({ data: [{ url: "https://cdn.test/result.mp4" }] });
+    },
+  });
+
+  const uploadCall = calls.find((call) => call.url.endsWith("/v1/temp-media/videos"));
+  const videoCall = calls.find((call) => call.url.endsWith("/v1/videos"));
+  assert.equal(uploadCall?.init.body.get("file").type, "video/mp4");
+  assert.deepEqual(JSON.parse(videoCall.init.body).content, [
+    {
+      type: "text",
+      text: "Recreate the reference video as faithfully as possible while following the supplied depth motion.",
+    },
+    { type: "video_url", video_url: { url: "https://storage.test/depth.mp4" }, role: "reference_video" },
+  ]);
+  assert.equal(JSON.parse(videoCall.init.body).duration, 8.25);
+  assert.equal(cleaned, true);
+  assert.equal(await readFile(result.artifacts[0].path, "utf8"), "result-video-bytes");
+});
+
+test("video copy falls back to depth keyframes only for video-fetch failures", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-video-copy-fallback-"));
+  const depth = join(dir, "depth.mp4");
+  const frames = [
+    join(dir, "depth-frame-01.png"),
+    join(dir, "depth-frame-02.png"),
+    join(dir, "depth-frame-03.png"),
+  ];
+  await writeFile(depth, "depth-video-bytes");
+  for (const frame of frames) await writeFile(frame, "depth-frame-bytes");
+  const calls = [];
+  let generationCount = 0;
+
+  const result = await runCommand({
+    group: "video",
+    action: "copy",
+    options: {
+      source: join(dir, "input.mp4"),
+      api_key: "key",
+      base_url: "https://router.test",
+      out: dir,
+      json: true,
+    },
+  }, {
+    prepareVideoCopy: async () => ({
+      source: join(dir, "input.mp4"),
+      depthPath: depth,
+      referencePaths: frames,
+      duration: 8,
+      sourceInfo: { duration: 8 },
+      helper: { inference: "depth-anything-v2-small-onnx" },
+      cleanup: async () => {},
+    }),
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/v1/temp-media/videos")) {
+        return jsonResponse({ data: { signed_url: "https://storage.test/depth.mp4" } });
+      }
+      if (url.endsWith("/v1/temp-media/images")) {
+        return jsonResponse({ data: { signed_url: `https://storage.test/depth-${calls.length}.png` } });
+      }
+      if (url === "https://cdn.test/result.mp4") {
+        return {
+          ok: true,
+          status: 200,
+          async arrayBuffer() {
+            return Buffer.from("result-video-bytes");
+          },
+        };
+      }
+      if (url.endsWith("/v1/videos")) {
+        generationCount += 1;
+        const body = JSON.parse(init.body);
+        if (body.content.some((item) => item.type === "video_url")) {
+          return jsonResponse({ code: "fail_to_fetch_task", message: "task failed at upstream provider" }, 400);
+        }
+        return jsonResponse({ data: [{ url: "https://cdn.test/result.mp4" }] });
+      }
+      return jsonResponse({ error: { message: "unexpected request" } }, 404);
+    },
+    prepareMediaInputs: undefined,
+    sleep: async () => {},
+  });
+
+  assert.equal(generationCount, 2);
+  assert.equal(result.copyReferenceMode, "depth-keyframes-fallback");
+  assert.equal(calls.filter((call) => call.url.endsWith("/v1/temp-media/images")).length, 3);
 });
 
 test("video dry-run preserves mixed media input order", async () => {
@@ -784,6 +951,71 @@ test("rejects more than five reference images in image generate", async () => {
     }),
     /maximum 5/,
   );
+});
+
+test("video generation accepts expanded Seedance 2.5 reference inputs", async () => {
+  const images = Array.from({ length: 6 }, (_, index) => `https://example.com/${index}.png`);
+  const result = await runCommand(parseArgv([
+    "video",
+    "generate",
+    "--model",
+    "seedance-2-5-pro",
+    "--prompt",
+    "clip",
+    ...images.flatMap((url) => ["--image-url", url]),
+    "--ratio",
+    "adaptive",
+    "--dry-run",
+    "--json",
+  ]), {
+    api_key: "key",
+    fetch: async (url, init) => {
+      if (init?.method === "HEAD") {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => "image/png" },
+        };
+      }
+      return jsonResponse({});
+    },
+  });
+
+  assert.equal(result.request.body.model, "seedance-2-5-pro");
+  assert.equal(result.request.body.ratio, "adaptive");
+  assert.equal(result.request.body.content.length, 7);
+});
+
+test("video generation accepts Seedance 2.5 mov references", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-seedance25-mov-"));
+  const video = join(dir, "reference.mov");
+  await writeFile(video, "video-bytes");
+
+  const result = await runCommand(parseArgv([
+    "video",
+    "generate",
+    "--model",
+    "seedance-2-5-pro",
+    "--prompt",
+    "clip",
+    "--file",
+    video,
+    "--dry-run",
+    "--json",
+  ]), {
+    api_key: "key",
+    fetch: async (url, init) => {
+      if (url.endsWith("/v1/temp-media/videos")) {
+        return jsonResponse({ data: { signed_url: "https://storage.test/reference.mov" } });
+      }
+      return jsonResponse({});
+    },
+  });
+
+  assert.deepEqual(result.request.body.content, [
+    { type: "text", text: "clip" },
+    { type: "video_url", video_url: { url: "https://storage.test/reference.mov" }, role: "reference_video" },
+  ]);
 });
 
 test("video generation saves remote result to default output directory", async () => {
