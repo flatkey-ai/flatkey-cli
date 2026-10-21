@@ -123,6 +123,10 @@ flatkey image generate \
   -o cover.png
 ```
 
+Reference images (`--file` / `--image-url`) are sent as an image edit: gpt
+models go through `/v1/images/edits`, Gemini models receive them as native
+`fileData` parts, so the input image is preserved instead of being ignored.
+
 Upload a local image and get a temporary signed URL:
 
 ```bash

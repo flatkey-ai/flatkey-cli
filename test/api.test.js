@@ -90,8 +90,8 @@ test("builds OpenAI image request for gpt image models", async () => {
   });
 });
 
-test("builds OpenAI image request with reference images", () => {
-  assert.deepEqual(planImageRequest({
+test("builds OpenAI image edit request with reference images", () => {
+  const request = planImageRequest({
     apiKey: "key",
     model: "gpt-image-2",
     prompt: "cover",
@@ -99,11 +99,39 @@ test("builds OpenAI image request with reference images", () => {
       { name: "file", url: "https://storage.test/a.png", kind: "image" },
       { name: "image_url", url: "https://storage.test/b.webp", kind: "image" },
     ],
-  }).body, {
+  });
+  assert.equal(request.url, "https://router.flatkey.ai/v1/images/edits");
+  assert.deepEqual(request.body, {
     model: "gpt-image-2",
     prompt: "cover",
-    images: ["https://storage.test/a.png", "https://storage.test/b.webp"],
+    images: [
+      { image_url: "https://storage.test/a.png" },
+      { image_url: "https://storage.test/b.webp" },
+    ],
     response_format: "url",
+    temp_url: true,
+  });
+});
+
+test("builds gemini image request with fileData reference parts", () => {
+  const request = planImageRequest({
+    apiKey: "key",
+    model: "gemini-3.1-flash-image",
+    prompt: "add a star",
+    __media_inputs: [
+      { name: "file", url: "https://storage.test/a.png", kind: "image", mime: "image/png" },
+      { name: "image_url", url: "https://storage.test/b.jpg?sig=1", kind: "image" },
+    ],
+  });
+  assert.match(request.url, /\/v1beta\/models\/gemini-3.1-flash-image:generateContent\?key=key$/);
+  assert.deepEqual(request.body, {
+    contents: [{
+      parts: [
+        { text: "add a star" },
+        { fileData: { mimeType: "image/png", fileUri: "https://storage.test/a.png" } },
+        { fileData: { mimeType: "image/jpeg", fileUri: "https://storage.test/b.jpg?sig=1" } },
+      ],
+    }],
     temp_url: true,
   });
 });
