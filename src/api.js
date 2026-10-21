@@ -44,12 +44,10 @@ export function planImageRequest(options) {
   if (mediaInputs.some((entry) => entry.kind === "video")) {
     throw new Error("Image models only accept image inputs.");
   }
-  const imageUrls = mediaInputs
-    .map((entry) => entry.url);
   if (model.startsWith("gpt")) {
     const responseFormat = options.response_format ?? options.responseFormat ?? "url";
     const tempUrl = options.temp_url ?? options.tempUrl;
-    return planJsonPost(options, "/v1/images/generations", cleanObject({
+    const payload = cleanObject({
       model,
       prompt: options.prompt,
       size: options.size,
@@ -57,8 +55,16 @@ export function planImageRequest(options) {
       quality: options.quality,
       response_format: responseFormat,
       temp_url: tempUrl ?? true,
-      images: imageUrls.length > 0 ? imageUrls : undefined,
-    }));
+    });
+    if (mediaInputs.length === 0) {
+      return planJsonPost(options, "/v1/images/generations", payload);
+    }
+    // Reference images are only honoured on the edits endpoint; generations
+    // silently ignores them and runs a plain text-to-image.
+    return planJsonPost(options, "/v1/images/edits", {
+      ...payload,
+      images: mediaInputs.map((entry) => ({ image_url: entry.url })),
+    });
   }
 
   const path = `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(options.apiKey)}`;
@@ -72,12 +78,24 @@ export function planImageRequest(options) {
       contents: [{
         parts: [
           { text: options.prompt },
-          ...imageUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+          // Gemini native parts: an OpenAI-style image_url part is ignored upstream.
+          ...mediaInputs.map((entry) => ({
+            fileData: { mimeType: imageMimeType(entry), fileUri: entry.url },
+          })),
         ],
       }],
       temp_url: true,
     },
   });
+}
+
+function imageMimeType(entry) {
+  if (entry.mime) return entry.mime;
+  const path = String(entry.url ?? "").split(/[?#]/)[0].toLowerCase();
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+  if (path.endsWith(".webp")) return "image/webp";
+  if (path.endsWith(".gif")) return "image/gif";
+  return "image/png";
 }
 
 export function generateVideo(options) {
