@@ -120,3 +120,46 @@ test("gemini image request maps --size to imageConfig", () => {
   assert.equal(plan(undefined), undefined);
   assert.equal(plan("1408x768"), undefined);
 });
+
+test("gemini --size ignores ratios and tiers Gemini does not support", () => {
+  const plan = (size) => planImageRequest({ apiKey: "key", model: "gemini-3-pro-image", prompt: "p", size }).body.generationConfig;
+  assert.equal(plan("7:5"), undefined);
+  assert.equal(plan("0:5"), undefined);
+  assert.equal(plan("8K"), undefined);
+  assert.deepEqual(plan("0.5K"), { responseModalities: ["TEXT", "IMAGE"], imageConfig: { imageSize: "0.5K" } });
+});
+
+test("--image-url surfaces network errors instead of an unknown MIME type", async () => {
+  await assert.rejects(
+    () => dryRunImageUrl(async () => {
+      throw new Error("getaddrinfo ENOTFOUND bucket.example.com");
+    }),
+    /Could not fetch --image-url .*ENOTFOUND/,
+  );
+});
+
+test("--image-url reports the HTTP status when the GET probe is refused", async () => {
+  await assert.rejects(
+    () => dryRunImageUrl(async (url, init) => {
+      if (init?.method === "HEAD") return { ok: false, status: 403, headers: headers({ "content-type": "application/xml" }) };
+      return { ok: false, status: 403, headers: headers({ "content-type": "application/xml" }) };
+    }),
+    /application\/xml \(HTTP 403\)/,
+  );
+});
+
+test("--image-url does not treat unknown ftyp brands (AVIF) as video", async () => {
+  const avif = Buffer.from([0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66, 0, 0, 0, 0]);
+  await assert.rejects(
+    () => runCommand(parseArgv([
+      "video", "generate", "--prompt", "clip", "--video-url", "https://example.com/x", "--dry-run", "--json",
+    ]), {
+      api_key: "key",
+      fetch: async (url, init) => {
+        if (init?.method === "HEAD") return { ok: true, status: 200, headers: headers({ "content-type": "image/avif" }) };
+        return streamResponse(avif, { status: 206, contentType: "image/avif" });
+      },
+    }),
+    /Unsupported --video-url MIME type/,
+  );
+});
