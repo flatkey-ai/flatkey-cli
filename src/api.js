@@ -84,9 +84,39 @@ export function planImageRequest(options) {
           })),
         ],
       }],
+      ...geminiGenerationConfig(options.size),
       temp_url: true,
     },
   });
+}
+
+const GEMINI_ASPECT_RATIOS = new Set(["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]);
+const GEMINI_IMAGE_SIZES = new Set(["0.5K", "1K", "2K", "4K"]);
+
+// Gemini image models take an aspect ratio and a resolution tier instead of
+// pixel sizes. --size accepts "2:3", "2K", or "1024x1536" (reduced to its
+// ratio); values Gemini does not support are left to the model default.
+function geminiGenerationConfig(size) {
+  if (typeof size !== "string" || !size.trim()) return {};
+  const value = size.trim();
+  const imageConfig = {};
+  const tier = /^(\d+(?:\.\d+)?)k$/i.exec(value);
+  const ratio = /^(\d+)\s*:\s*(\d+)$/.exec(value) ?? /^(\d+)\s*[x×]\s*(\d+)$/i.exec(value);
+  if (tier && GEMINI_IMAGE_SIZES.has(`${tier[1]}K`)) {
+    imageConfig.imageSize = `${tier[1]}K`;
+  } else if (ratio) {
+    const reduced = reduceRatio(Number(ratio[1]), Number(ratio[2]));
+    if (GEMINI_ASPECT_RATIOS.has(reduced)) imageConfig.aspectRatio = reduced;
+  }
+  if (Object.keys(imageConfig).length === 0) return {};
+  return { generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig } };
+}
+
+function reduceRatio(width, height) {
+  if (!width || !height) return `${width}:${height}`;
+  const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+  const divisor = gcd(width, height);
+  return `${width / divisor}:${height / divisor}`;
 }
 
 function imageMimeType(entry) {

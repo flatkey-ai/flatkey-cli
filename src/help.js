@@ -165,7 +165,7 @@ Options:
 
 Options:
   --model <model>                Model id
-  --size <size>                  Image size for OpenAI-style image models
+  --size <size>                  Image size: 1024x1536 for OpenAI-style models; 2:3 or 2K for Gemini
   --quality <quality>             Image quality for supported models
   --n <count>                    Number of images for supported models
   --file <path>                  Local image input, repeatable

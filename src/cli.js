@@ -797,11 +797,31 @@ async function uploadLocalMedia(file, commandGroup, deps, optionName) {
 
 async function confirmRemoteMediaUrl(url, commandGroup, deps, optionName) {
   const fetchImpl = deps.fetch ?? fetch;
-  const response = await fetchImpl(url, { method: "HEAD" });
-  const media = mediaInfoFromMime(headerValue(response?.headers, "content-type"));
   const allowedKinds = allowedMediaKindsForOption(commandGroup, optionName);
+  let contentType;
+  let media;
+  try {
+    const response = await fetchWithTimeout(fetchImpl, url, { method: "HEAD" });
+    contentType = headerValue(response?.headers, "content-type");
+    if (isOkResponse(response)) media = mediaInfoFromMime(contentType);
+  } catch {
+    // Some hosts reject HEAD outright; fall through to the ranged GET probe.
+  }
+  let probed = {};
   if (!media || !allowedKinds.has(media.kind)) {
-    throw new Error(`Unsupported --${optionName.replaceAll("_", "-")} MIME type for flatkey ${commandGroup} generate: ${headerValue(response?.headers, "content-type") ?? "unknown"}`);
+    // Signed object-store URLs (S3/OSS/GCS) are often signed for GET only and
+    // answer HEAD with 403 + XML. Probe the first bytes with a ranged GET.
+    probed = await probeRemoteMediaWithGet(url, fetchImpl);
+    if (probed.contentType) contentType = probed.contentType;
+    if (probed.media) media = probed.media;
+  }
+  if (!media || !allowedKinds.has(media.kind)) {
+    const flag = `--${optionName.replaceAll("_", "-")}`;
+    if (probed.error) {
+      throw new Error(`Could not fetch ${flag} ${url}: ${probed.error?.message ?? probed.error}`);
+    }
+    const status = probed.ok === false && probed.status ? ` (HTTP ${probed.status})` : "";
+    throw new Error(`Unsupported ${flag} MIME type for flatkey ${commandGroup} generate: ${contentType ?? "unknown"}${status}`);
   }
   return {
     name: optionName,
@@ -810,6 +830,109 @@ async function confirmRemoteMediaUrl(url, commandGroup, deps, optionName) {
     role: mediaRoleFromOption(optionName, media.kind),
     mime: media.contentType,
   };
+}
+
+const REMOTE_MEDIA_PROBE_BYTES = 64 * 1024;
+const REMOTE_MEDIA_PROBE_TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(fetchImpl, url, init) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REMOTE_MEDIA_PROBE_TIMEOUT_MS);
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isOkResponse(response) {
+  if (typeof response?.ok === "boolean") return response.ok;
+  const status = Number(response?.status);
+  return Number.isFinite(status) ? status >= 200 && status < 300 : true;
+}
+
+// Reads at most REMOTE_MEDIA_PROBE_BYTES from a ranged GET, identifies the
+// media type from the leading magic bytes (or Content-Type when no bytes could
+// be read), then aborts the transfer so a large reference is never downloaded
+// in full.
+async function probeRemoteMediaWithGet(url, fetchImpl) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REMOTE_MEDIA_PROBE_TIMEOUT_MS);
+  try {
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method: "GET",
+        headers: { Range: `bytes=0-${REMOTE_MEDIA_PROBE_BYTES - 1}` },
+        signal: controller.signal,
+      });
+    } catch (error) {
+      return { error };
+    }
+    const contentType = headerValue(response?.headers, "content-type");
+    const status = response?.status;
+    if (!isOkResponse(response)) return { contentType, status, ok: false };
+    try {
+      const head = await readLeadingBytes(response, REMOTE_MEDIA_PROBE_BYTES);
+      const sniffed = mediaInfoFromBytes(head);
+      if (sniffed) return { contentType, status, media: sniffed };
+      // A declared type is only trusted when no bytes could be read; otherwise
+      // the bytes have to agree (an XML error page is not an image).
+      if (head.length === 0) return { contentType, status, media: mediaInfoFromMime(contentType) };
+      return { contentType, status };
+    } catch (error) {
+      return { contentType, status, error };
+    }
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+async function readLeadingBytes(response, limit) {
+  const body = response?.body;
+  if (body && typeof body.getReader === "function") {
+    const reader = body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+      while (total < limit) {
+        const { done, value } = await reader.read();
+        if (done || !value) break;
+        chunks.push(Buffer.from(value));
+        total += value.length;
+      }
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+    return Buffer.concat(chunks).subarray(0, limit);
+  }
+  // Without a readable stream the body cannot be read partially; rely on
+  // Content-Type rather than buffering an unbounded download.
+  return Buffer.alloc(0);
+}
+
+function mediaInfoFromBytes(bytes) {
+  if (!bytes || bytes.length < 4) return undefined;
+  const ascii = (start, end) => bytes.subarray(start, end).toString("latin1");
+  if (bytes[0] === 0x89 && ascii(1, 4) === "PNG") return { kind: "image", contentType: "image/png" };
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return { kind: "image", contentType: "image/jpeg" };
+  if (ascii(0, 4) === "RIFF" && bytes.length >= 12 && ascii(8, 12) === "WEBP") return { kind: "image", contentType: "image/webp" };
+  if (ascii(0, 4) === "GIF8") return { kind: "image", contentType: "image/gif" };
+  if (ascii(0, 2) === "BM" && bytes.length >= 18 && [12, 40, 52, 56, 64, 108, 124].includes(bytes.readUInt32LE(14))) {
+    return { kind: "image", contentType: "image/bmp" };
+  }
+  if (ascii(0, 4) === "II*\0" || ascii(0, 4) === "MM\0*") return { kind: "image", contentType: "image/tiff" };
+  if (bytes.length >= 12 && ascii(4, 8) === "ftyp") {
+    const brand = ascii(8, 12);
+    if (["heic", "heix", "hevc", "hevx", "heim", "heis"].includes(brand)) return { kind: "image", contentType: "image/heic" };
+    if (["mif1", "msf1"].includes(brand)) return { kind: "image", contentType: "image/heif" };
+    if (brand === "qt  ") return { kind: "video", contentType: "video/quicktime" };
+    if (["isom", "iso2", "iso3", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1", "dash", "M4V "].includes(brand)) {
+      return { kind: "video", contentType: "video/mp4" };
+    }
+  }
+  return undefined;
 }
 
 function extractUploadedMediaUrl(response) {
