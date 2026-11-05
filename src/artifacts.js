@@ -16,9 +16,19 @@ const MIME_EXTENSIONS = {
   "audio/mpeg": "mp3",
   "audio/mp3": "mp3",
   "audio/wav": "wav",
+  "image/gif": "gif",
   "image/jpeg": "jpg",
   "image/png": "png",
+  "image/webp": "webp",
   "video/mp4": "mp4",
+};
+
+const FORMAT_EXTENSIONS = {
+  gif: "gif",
+  jpeg: "jpg",
+  jpg: "jpg",
+  png: "png",
+  webp: "webp",
 };
 
 export async function persistArtifacts({
@@ -26,27 +36,43 @@ export async function persistArtifacts({
   response,
   outDir = "flatkey-output",
   output,
+  format,
   fetch: fetchImpl = fetch,
 }) {
   output = expandHomePath(output);
   const items = extractItems(response);
   const artifacts = [];
+  const extension = artifactExtension({ kind, format });
   await mkdir(output ? dirname(output) : outDir, { recursive: true });
-  const startIndex = output ? 0 : await nextArtifactIndex({ kind, outDir });
+  const startIndex = output ? 0 : await nextArtifactIndex({ kind, outDir, format });
 
   for (const [index, item] of items.entries()) {
-    const artifact = await persistItem({ kind, item, outDir, output, index: index + startIndex, fetchImpl });
+    const artifact = await persistItem({
+      kind,
+      item,
+      outDir,
+      output,
+      index: index + startIndex,
+      extension,
+      fetchImpl,
+    });
     if (artifact) artifacts.push(artifact);
   }
 
   return artifacts;
 }
 
-export async function nextArtifactPath({ kind, outDir = "flatkey-output" }) {
-  const extension = DEFAULT_EXTENSIONS[kind] ?? "bin";
-  const index = await nextArtifactIndex({ kind, outDir });
+export async function nextArtifactPath({ kind, outDir = "flatkey-output", format }) {
+  const extension = artifactExtension({ kind, format });
+  const index = await nextArtifactIndex({ kind, outDir, format });
   const number = String(index + 1).padStart(2, "0");
   return join(outDir, `${kind}-${number}.${extension}`);
+}
+
+function artifactExtension({ kind, format }) {
+  return FORMAT_EXTENSIONS[String(format ?? "").toLowerCase()]
+    ?? DEFAULT_EXTENSIONS[kind]
+    ?? "bin";
 }
 
 function expandHomePath(path) {
@@ -56,7 +82,7 @@ function expandHomePath(path) {
   return path;
 }
 
-async function persistItem({ kind, item, outDir, output, index, fetchImpl }) {
+async function persistItem({ kind, item, outDir, output, index, extension, fetchImpl }) {
   const dataUrl = getString(item, ["url", "video_url", "data_url", "dataUrl", "temp_url"]);
   if (dataUrl?.startsWith("data:")) {
     const parsed = parseDataUrl(dataUrl);
@@ -66,13 +92,7 @@ async function persistItem({ kind, item, outDir, output, index, fetchImpl }) {
   }
   if (dataUrl?.startsWith("http://") || dataUrl?.startsWith("https://")) {
     if (output) {
-      const path = artifactPath({
-        kind,
-        outDir,
-        output,
-        index,
-        extension: DEFAULT_EXTENSIONS[kind] ?? "bin",
-      });
+      const path = artifactPath({ kind, outDir, output, index, extension });
       await downloadArtifact({ url: dataUrl, path, fetchImpl });
       return { path };
     }
@@ -81,7 +101,7 @@ async function persistItem({ kind, item, outDir, output, index, fetchImpl }) {
 
   const base64 = getString(item, ["b64_json", "base64", "data"]);
   if (base64) {
-    const path = artifactPath({ kind, outDir, output, index, extension: DEFAULT_EXTENSIONS[kind] });
+    const path = artifactPath({ kind, outDir, output, index, extension });
     await writeFile(path, Buffer.from(base64, "base64"));
     return { path };
   }
@@ -145,8 +165,8 @@ function artifactPath({ kind, outDir, output, index, extension }) {
   return join(outDir, `${kind}-${number}.${extension}`);
 }
 
-async function nextArtifactIndex({ kind, outDir }) {
-  const extension = DEFAULT_EXTENSIONS[kind] ?? "bin";
+async function nextArtifactIndex({ kind, outDir, format }) {
+  const extension = artifactExtension({ kind, format });
   const pattern = new RegExp(`^${escapeRegExp(kind)}-(\\d+)\\.${escapeRegExp(extension)}$`);
   let max = 0;
   try {

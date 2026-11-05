@@ -90,6 +90,106 @@ test("builds OpenAI image request for gpt image models", async () => {
   });
 });
 
+test("builds OpenAI animated gif image request", () => {
+  const request = planImageRequest({
+    apiKey: "key",
+    model: "gpt-image-2.6",
+    prompt: "folding paper crane",
+    output_format: "gif",
+    frame_count: "9",
+    frame_duration_ms: "200",
+    quality: "high",
+    complexity: "low",
+  });
+
+  assert.equal(request.url, "https://router.flatkey.ai/v1/images/generations");
+  assert.deepEqual(request.body, {
+    model: "gpt-image-2.6",
+    prompt: "folding paper crane",
+    quality: "high",
+    output_format: "gif",
+    frame_count: 9,
+    frame_duration_ms: 200,
+    complexity: "low",
+    response_format: "url",
+    temp_url: true,
+  });
+});
+
+test("keeps gif options on the edits endpoint with reference images", () => {
+  const request = planImageRequest({
+    apiKey: "key",
+    model: "gpt-image-2.6",
+    prompt: "animate this logo",
+    output_format: "gif",
+    frame_count: "4",
+    __media_inputs: [
+      { name: "file", url: "https://storage.test/logo.png", kind: "image" },
+    ],
+  });
+
+  assert.equal(request.url, "https://router.flatkey.ai/v1/images/edits");
+  assert.equal(request.body.output_format, "gif");
+  assert.equal(request.body.frame_count, 4);
+  assert.deepEqual(request.body.images, [{ image_url: "https://storage.test/logo.png" }]);
+});
+
+test("rejects unsupported image output formats", () => {
+  assert.throws(
+    () => planImageRequest({
+      apiKey: "key",
+      model: "gpt-image-2.6",
+      prompt: "cover",
+      output_format: "tiff",
+    }),
+    /Invalid output format: tiff/,
+  );
+});
+
+test("rejects non-positive gif frame options", () => {
+  assert.throws(
+    () => planImageRequest({
+      apiKey: "key",
+      model: "gpt-image-2.6",
+      prompt: "cover",
+      output_format: "gif",
+      frame_count: "many",
+    }),
+    /Invalid frame count: many/,
+  );
+  assert.throws(
+    () => planImageRequest({
+      apiKey: "key",
+      model: "gpt-image-2.6",
+      prompt: "cover",
+      output_format: "gif",
+      frame_duration_ms: "0",
+    }),
+    /Invalid frame duration: 0/,
+  );
+});
+
+test("rejects gpt-only image options on gemini models", () => {
+  assert.throws(
+    () => planImageRequest({
+      apiKey: "key",
+      model: "gemini-3.1-flash-image",
+      prompt: "cover",
+      output_format: "gif",
+    }),
+    /--output-format is only supported by gpt image models, not gemini-3.1-flash-image/,
+  );
+  assert.throws(
+    () => planImageRequest({
+      apiKey: "key",
+      model: "gemini-3.1-flash-image",
+      prompt: "cover",
+      frame_count: "9",
+    }),
+    /--frame-count is only supported by gpt image models/,
+  );
+});
+
 test("builds OpenAI image edit request with reference images", () => {
   const request = planImageRequest({
     apiKey: "key",

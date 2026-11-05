@@ -60,4 +60,8 @@ test("command help covers each command and action", () => {
   assert.match(getCommandHelp("video", "generate"), /--generate-audio/);
   assert.match(getCommandHelp("video", "copy"), /--frame-ratio/);
   assert.match(getCommandHelp("video", "copy"), /--depth-resolution/);
+  assert.match(getCommandHelp("image", "generate"), /--output-format/);
+  assert.match(getCommandHelp("image", "generate"), /--frame-count/);
+  assert.match(getCommandHelp("image", "generate"), /--frame-duration-ms/);
+  assert.match(getCommandHelp("image", "generate"), /--complexity/);
 });

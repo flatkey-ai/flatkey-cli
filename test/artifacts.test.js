@@ -20,6 +20,58 @@ test("saves OpenAI base64 image artifacts", async () => {
   assert.equal(await readFile(artifacts[0].path, "utf8"), "png-bytes");
 });
 
+test("names base64 image artifacts with the requested output format", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
+  await writeFile(join(outDir, "image-01.gif"), "existing-gif");
+
+  const artifacts = await persistArtifacts({
+    kind: "image",
+    response: { data: [{ b64_json: Buffer.from("gif-bytes").toString("base64") }] },
+    outDir,
+    format: "gif",
+  });
+
+  assert.match(artifacts[0].path, /image-02\.gif$/);
+  assert.equal(await readFile(artifacts[0].path, "utf8"), "gif-bytes");
+});
+
+test("downloads remote gif artifact to explicit output path", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
+  const output = join(outDir, "loop.gif");
+
+  const artifacts = await persistArtifacts({
+    kind: "image",
+    response: { data: [{ url: "https://cdn.test/loop.gif" }] },
+    output,
+    format: "gif",
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      async arrayBuffer() {
+        return Buffer.from("gif-bytes");
+      },
+    }),
+  });
+
+  assert.deepEqual(artifacts, [{ path: output }]);
+  assert.equal(await readFile(output, "utf8"), "gif-bytes");
+});
+
+test("saves data url gif artifacts with mime extension", async () => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
+
+  const artifacts = await persistArtifacts({
+    kind: "image",
+    response: {
+      data: [{ url: `data:image/gif;base64,${Buffer.from("gif-bytes").toString("base64")}` }],
+    },
+    outDir,
+  });
+
+  assert.match(artifacts[0].path, /image-01\.gif$/);
+  assert.equal(await readFile(artifacts[0].path, "utf8"), "gif-bytes");
+});
+
 test("saves data url video artifacts with mime extension", async () => {
   const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
 

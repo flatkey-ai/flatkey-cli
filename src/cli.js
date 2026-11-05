@@ -32,7 +32,7 @@ const COMMAND_OPTIONS = {
   credits: new Set([]),
   help: new Set(["ai", "command"]),
   image: new Set([]),
-  "image generate": new Set(["file", "image", "image_url", "model", "n", "prompt", "quality", "size"]),
+  "image generate": new Set(["complexity", "file", "frame_count", "frame_duration_ms", "image", "image_url", "model", "n", "output_format", "prompt", "quality", "size"]),
   "image upload": new Set(["file"]),
   login: new Set(["console_url", "no_open", "open"]),
   logout: new Set([]),
@@ -669,6 +669,7 @@ async function handleGenerate(command, deps) {
       return { kind: command.group, text, output, response };
     }
     const outDir = command.options.out ?? "flatkey-output";
+    const format = command.group === "image" ? command.options.output_format : undefined;
     const output = command.options.output
       ?? (command.group === "video" ? await nextArtifactPath({ kind: command.group, outDir }) : undefined);
     const artifacts = await persistArtifacts({
@@ -676,6 +677,7 @@ async function handleGenerate(command, deps) {
       response: artifactResponse,
       outDir,
       output,
+      format,
       fetch: deps.fetch,
     });
     return {

@@ -15,6 +15,7 @@ JSON mode:
 
 Commands:
 - flatkey image generate --prompt "<prompt>" --json [--model <model>] [--file <path>] [--image-url <url>] [--output image.png]
+- flatkey image generate --prompt "<prompt>" --json --model gpt-image-2.6 --output-format gif [--frame-count 9] [--frame-duration-ms 200] [--quality high] [--complexity low] [--output loop.gif]
 - flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--file <path>] [--image-url <url>] [--video-url <url>] [--ratio 16:9] [--resolution 720p] [--output video.mp4]
 - flatkey video copy --source input.mp4 --json [--model seedance2] [--frame-ratio 80] [--depth-resolution 480p] [--output video.mp4]
 - flatkey audio generate --prompt "<text>" --json [--voice-id <voice_id>] [--model eleven_multilingual_v2] [--output speech.mp3]
@@ -83,6 +84,14 @@ Environment:
 Video options:
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, 1:1, or adaptive
   --resolution <value>            480p, 720p, or 1080p
+
+Image options (gpt image models):
+  --size <size>                   Image size, e.g. 1024x1024
+  --quality <quality>             Image quality, e.g. high
+  --output-format <format>        png, jpeg, webp, or gif
+  --frame-count <count>           Animation frames for gif output
+  --frame-duration-ms <ms>        Milliseconds per gif frame
+  --complexity <level>            Animation complexity, e.g. low
 `;
 }
 
@@ -168,6 +177,10 @@ Options:
   --size <size>                  Image size for OpenAI-style image models
   --quality <quality>             Image quality for supported models
   --n <count>                    Number of images for supported models
+  --output-format <format>        png, jpeg, webp, or gif; gpt image models only
+  --frame-count <count>           Animation frames for gif output, gpt image models only
+  --frame-duration-ms <ms>        Milliseconds per gif frame, gpt image models only
+  --complexity <level>            Animation complexity, e.g. low; gpt image models only
   --file <path>                  Local image input, repeatable
   --image-url <url>               Remote image input, repeatable
   --output, -o <file>             Write image file

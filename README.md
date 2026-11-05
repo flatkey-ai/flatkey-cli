@@ -127,6 +127,26 @@ Reference images (`--file` / `--image-url`) are sent as an image edit: gpt
 models go through `/v1/images/edits`, Gemini models receive them as native
 `fileData` parts, so the input image is preserved instead of being ignored.
 
+Animated GIFs (gpt-image-2.6):
+
+```bash
+flatkey image generate \
+  --prompt "a paper crane folding itself, soft studio light" \
+  --model gpt-image-2.6 \
+  --output-format gif \
+  --frame-count 9 \
+  --frame-duration-ms 200 \
+  --quality high \
+  --complexity low \
+  -o crane.gif
+```
+
+`--output-format` accepts `png`, `jpeg`, `webp`, or `gif`. `--frame-count`,
+`--frame-duration-ms`, `--quality`, and `--complexity` shape the animation.
+These options are gpt image model only; passing them with a Gemini model fails
+instead of silently returning a still image. When no `-o` path is given, saved
+artifacts use the requested format's extension (e.g. `flatkey-output/image-01.gif`).
+
 Upload a local image and get a temporary signed URL:
 
 ```bash

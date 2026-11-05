@@ -3,6 +3,7 @@ import { withCliRequestHeaders } from "./requestHeaders.js";
 export const DEFAULT_BASE_URL = "https://router.flatkey.ai";
 export const DEFAULT_MODELS_BASE_URL = "https://console.flatkey.ai";
 export const DEFAULT_CONSOLE_URL = "https://console.flatkey.ai";
+export const IMAGE_OUTPUT_FORMATS = ["png", "jpeg", "webp", "gif"];
 
 export class FlatkeyError extends Error {
   constructor(message, { status, code } = {}) {
@@ -53,6 +54,21 @@ export function planImageRequest(options) {
       size: options.size,
       n: parseOptionalInteger(options.n),
       quality: options.quality,
+      // Animated GIF output and its frame controls are gpt-image-2.6 features.
+      output_format: validateOptionalValue(
+        optionValue(options, "output_format", "outputFormat"),
+        IMAGE_OUTPUT_FORMATS,
+        "output format",
+      ),
+      frame_count: parseOptionalPositiveInteger(
+        optionValue(options, "frame_count", "frameCount"),
+        "frame count",
+      ),
+      frame_duration_ms: parseOptionalPositiveInteger(
+        optionValue(options, "frame_duration_ms", "frameDurationMs"),
+        "frame duration",
+      ),
+      complexity: options.complexity,
       response_format: responseFormat,
       temp_url: tempUrl ?? true,
     });
@@ -67,6 +83,7 @@ export function planImageRequest(options) {
     });
   }
 
+  assertGptImageOnlyOptions(options, model);
   const path = `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(options.apiKey)}`;
   return planRequest(options, path, {
     method: "POST",
@@ -87,6 +104,23 @@ export function planImageRequest(options) {
       temp_url: true,
     },
   });
+}
+
+// gpt-image animation and complexity controls have no Gemini equivalent, so
+// silently dropping them would hand back a still PNG with a .gif name.
+const GPT_IMAGE_ONLY_OPTIONS = [
+  ["output_format", "outputFormat"],
+  ["frame_count", "frameCount"],
+  ["frame_duration_ms", "frameDurationMs"],
+  ["complexity"],
+];
+
+function assertGptImageOnlyOptions(options, model) {
+  for (const aliases of GPT_IMAGE_ONLY_OPTIONS) {
+    if (optionValue(options, ...aliases) === undefined) continue;
+    const flag = `--${aliases[0].replaceAll("_", "-")}`;
+    throw new Error(`${flag} is only supported by gpt image models, not ${model}.`);
+  }
 }
 
 function imageMimeType(entry) {
@@ -409,6 +443,15 @@ function jsonHeaders(apiKey) {
 function parseOptionalInteger(value) {
   if (value === undefined) return undefined;
   return Number.parseInt(value, 10);
+}
+
+function parseOptionalPositiveInteger(value, name) {
+  if (value === undefined) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`Invalid ${name}: ${value}. Expected a positive integer.`);
+  }
+  return parsed;
 }
 
 function parseOptionalFloat(value) {

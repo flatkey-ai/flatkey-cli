@@ -20,6 +20,41 @@ test("parses image generation with prompt and json mode", () => {
   });
 });
 
+test("parses gpt image animation options", () => {
+  const command = parseArgv([
+    "image",
+    "generate",
+    "--prompt",
+    "folding paper crane",
+    "--model",
+    "gpt-image-2.6",
+    "--output-format",
+    "gif",
+    "--frame-count",
+    "9",
+    "--frame-duration-ms",
+    "200",
+    "--quality",
+    "high",
+    "--complexity",
+    "low",
+  ]);
+
+  assert.deepEqual(command, {
+    group: "image",
+    action: "generate",
+    options: {
+      prompt: "folding paper crane",
+      model: "gpt-image-2.6",
+      output_format: "gif",
+      frame_count: "9",
+      frame_duration_ms: "200",
+      quality: "high",
+      complexity: "low",
+    },
+  });
+});
+
 test("parses credits with json mode", () => {
   const command = parseArgv(["credits", "--json"]);
 
@@ -680,6 +715,51 @@ test("image upload accepts url field aliases", async () => {
   });
 
   assert.equal(result.url, "https://storage.test/cat.png");
+});
+
+test("gif image generation sends animation params and saves a .gif artifact", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "flatkey-image-gif-"));
+  const calls = [];
+
+  const result = await runCommand({
+    group: "image",
+    action: "generate",
+    options: {
+      prompt: "folding paper crane",
+      model: "gpt-image-2.6",
+      output_format: "gif",
+      frame_count: "9",
+      frame_duration_ms: "200",
+      quality: "high",
+      complexity: "low",
+      api_key: "key",
+      base_url: "https://router.test",
+      out: dir,
+      json: true,
+    },
+  }, {
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return jsonResponse({
+        data: [{ b64_json: Buffer.from("gif-bytes").toString("base64") }],
+      });
+    },
+  });
+
+  assert.equal(calls[0].url, "https://router.test/v1/images/generations");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    model: "gpt-image-2.6",
+    prompt: "folding paper crane",
+    quality: "high",
+    output_format: "gif",
+    frame_count: 9,
+    frame_duration_ms: 200,
+    complexity: "low",
+    response_format: "url",
+    temp_url: true,
+  });
+  assert.match(result.artifacts[0].path, /image-01\.gif$/);
+  assert.equal(await readFile(result.artifacts[0].path, "utf8"), "gif-bytes");
 });
 
 test("video generation uploads local image references before request", async () => {
