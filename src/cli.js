@@ -119,21 +119,36 @@ function parseOptions(tokens, repeatableOptions = REPEATABLE_OPTIONS) {
     if (!token.startsWith("--")) {
       throw new Error(`Unexpected argument: ${token}`);
     }
-    const name = token.slice(2).replaceAll("-", "_");
-    const next = tokens[index + 1];
-    if (!next || next.startsWith("--")) {
-      options[name] = true;
-      continue;
+    const separator = token.indexOf("=");
+    let name;
+    let value;
+    if (separator === -1) {
+      name = token.slice(2).replaceAll("-", "_");
+      const next = tokens[index + 1];
+      if (!next || next.startsWith("--")) {
+        options[name] = true;
+        continue;
+      }
+      value = next;
+      index += 1;
+    } else {
+      name = token.slice(2, separator).replaceAll("-", "_");
+      value = token.slice(separator + 1);
+      if (!name) {
+        throw new Error(`Unexpected argument: ${token}`);
+      }
+      if (!value) {
+        throw new Error(`Missing value for --${name.replaceAll("_", "-")}.`);
+      }
     }
     if (repeatableOptions.has(name)) {
-      options[name] = [...asArray(options[name]), next];
+      options[name] = [...asArray(options[name]), value];
     } else {
-      options[name] = next;
+      options[name] = value;
     }
     if (MEDIA_INPUT_OPTIONS.has(name)) {
-      mediaInputs.push({ name, value: next });
+      mediaInputs.push({ name, value });
     }
-    index += 1;
   }
   if (mediaInputs.length > 0) {
     Object.defineProperty(options, "__media_inputs", {

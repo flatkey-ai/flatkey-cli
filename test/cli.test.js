@@ -171,6 +171,47 @@ test("parses repeatable file and media url inputs", () => {
   assert.deepEqual(video.options.video_url, ["https://example.com/c.mp4"]);
 });
 
+test("parses --flag=value options", () => {
+  const command = parseArgv([
+    "image",
+    "generate",
+    "--model=gpt-image-2.6-flare",
+    "--prompt=anime girl dancing",
+    "--output-format=gif",
+    "--frame-count=12",
+    "--frame-duration-ms=120",
+  ]);
+
+  assert.deepEqual(command, {
+    group: "image",
+    action: "generate",
+    options: {
+      model: "gpt-image-2.6-flare",
+      prompt: "anime girl dancing",
+      output_format: "gif",
+      frame_count: "12",
+      frame_duration_ms: "120",
+    },
+  });
+
+  const repeatable = parseArgv([
+    "image",
+    "generate",
+    "--prompt=x",
+    "--file=./a.png",
+    "--file",
+    "./b.webp",
+    "--image-url=https://example.com/c-d.png",
+  ]);
+  assert.deepEqual(repeatable.options.file, ["./a.png", "./b.webp"]);
+  assert.deepEqual(repeatable.options.image_url, ["https://example.com/c-d.png"]);
+
+  assert.throws(
+    () => parseArgv(["image", "generate", "--prompt="]),
+    /Missing value for --prompt/,
+  );
+});
+
 test("parses image upload command", () => {
   assert.deepEqual(parseArgv(["image", "upload", "--file", "./cat.png", "--json"]), {
     group: "image",

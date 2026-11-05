@@ -1,2 +1,3 @@
 flatkey-output/
+node_modules/
 rust/**/target/
