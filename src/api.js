@@ -1,16 +1,22 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { withCliRequestHeaders } from "./requestHeaders.js";
+import { imageModelFamily, PREFERRED_MEDIA_MODELS } from "./models.js";
 
 export const DEFAULT_BASE_URL = "https://router.flatkey.ai";
 export const DEFAULT_MODELS_BASE_URL = "https://console.flatkey.ai";
 export const DEFAULT_CONSOLE_URL = "https://console.flatkey.ai";
 export const IMAGE_OUTPUT_FORMATS = ["png", "jpeg", "webp", "gif"];
+const jsonResponseMetadata = new WeakMap();
+
+export function getResponseMetadata(body) {
+  return jsonResponseMetadata.get(body);
+}
 
 export class FlatkeyError extends Error {
-  constructor(message, { status, code } = {}) {
+  constructor(message, details = {}) {
     super(message);
     this.name = "FlatkeyError";
-    this.status = status;
-    this.code = code;
+    Object.assign(this, details);
   }
 }
 
@@ -39,13 +45,19 @@ async function uploadTempMediaByKind(options, kind) {
 }
 
 export function planImageRequest(options) {
-  const model = options.model ?? "nano-banana-pro-preview";
+  const model = options.model ?? PREFERRED_MEDIA_MODELS.image[0];
+  const family = imageModelFamily(model);
+  if (!family) {
+    throw new FlatkeyError(`Unsupported image model: ${model}. Run \`flatkey models --type image\` to find a supported model.`, {
+      code: "unsupported_image_model",
+    });
+  }
   const mediaInputs = orderedMediaInputs(options);
   assertReferenceLimits(mediaInputs, "image", model);
   if (mediaInputs.some((entry) => entry.kind === "video")) {
     throw new Error("Image models only accept image inputs.");
   }
-  if (model.startsWith("gpt")) {
+  if (family === "gpt") {
     const responseFormat = options.response_format ?? options.responseFormat ?? "url";
     const tempUrl = options.temp_url ?? options.tempUrl;
     const payload = cleanObject({
@@ -83,20 +95,15 @@ export function planImageRequest(options) {
     });
   }
 
-  assertGptImageOnlyOptions(options, model);
-  // Seedream is an OpenAI-style image model, not a Gemini one. It accepts a
-  // plain `image` URL array on /v1/images/generations and rejects temp_url.
-  if (isSeedreamImageModel(model)) {
-    return planJsonPost(options, "/v1/images/generations", cleanObject({
-      model,
-      prompt: options.prompt,
-      size: options.size,
-      n: parseOptionalInteger(options.n),
-      response_format: options.response_format ?? options.responseFormat ?? "url",
-      image: mediaInputs.length > 0 ? mediaInputs.map((entry) => entry.url) : undefined,
-    }));
+  assertGptImageOnlyOptions(options, model, family);
+  if ((family === "seedream" || family === "grok") && parseOptionalBoolean(optionValue(options, "temp_url", "tempUrl"))) {
+    throw new Error(`temp_url is unsupported for ${model}. Use response_format=url for hosted images.`);
   }
+  if (family === "seedream") return planSeedreamImage(options, model, mediaInputs);
+  if (family === "grok") return planGrokImage(options, model, mediaInputs);
 
+  if (options.quality !== undefined) throw new Error(`--quality is unsupported for ${model}.`);
+  assertSingleImageCount(options.n, model);
   const path = `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(options.apiKey)}`;
   return planRequest(options, path, {
     method: "POST",
@@ -114,9 +121,76 @@ export function planImageRequest(options) {
           })),
         ],
       }],
+      ...(options.size === undefined ? {} : { generationConfig: geminiImageSize(options.size) }),
       temp_url: true,
     },
   });
+}
+
+function planSeedreamImage(options, model, mediaInputs) {
+  if (options.quality !== undefined) throw new Error(`--quality is unsupported for ${model}.`);
+  assertSingleImageCount(options.n, model);
+  const format = optionValue(options, "output_format", "outputFormat");
+  if (format !== undefined && /seedream[-_.]?4[-_.]?5/i.test(model)) {
+    throw new Error(`--output-format is unsupported for ${model}.`);
+  }
+  return planJsonPost(options, "/v1/images/generations", cleanObject({
+    model,
+    prompt: options.prompt,
+    size: options.size,
+    image: mediaInputs.length ? mediaInputs.map((entry) => entry.url) : undefined,
+    output_format: validateOptionalValue(format, ["png", "jpeg"], "output format"),
+    response_format: imageResponseFormat(options),
+  }));
+}
+
+function planGrokImage(options, model, mediaInputs) {
+  const modelId = model.toLowerCase().split("/").at(-1);
+  if (!modelId.startsWith("grok-imagine-image")) {
+    if (mediaInputs.length) throw new Error(`Model ${model} cannot edit reference images. Use a Grok Imagine image model.`);
+    if (options.size !== undefined) throw new Error(`--size is unsupported for ${model}.`);
+  }
+  if (options.quality !== undefined && modelId !== "grok-imagine-image-2.0") {
+    throw new Error(`--quality for Grok images requires grok-imagine-image-2.0. Selected model: ${model}.`);
+  }
+  const n = options.n === undefined ? undefined : Number(options.n);
+  if (n !== undefined && (!Number.isInteger(n) || n < 1 || n > 10)) {
+    throw new Error(`Invalid --n for ${model}: expected an integer from 1 to 10.`);
+  }
+  const size = options.size === undefined ? undefined : String(options.size).trim().toLowerCase();
+  const payload = cleanObject({
+    model,
+    prompt: options.prompt,
+    n,
+    quality: options.quality === "auto" ? undefined : validateOptionalValue(options.quality, ["low", "medium"], "quality"),
+    resolution: validateOptionalValue(size, ["1k", "2k"], "Grok image size"),
+    response_format: imageResponseFormat(options),
+  });
+  if (mediaInputs.length === 0) return planJsonPost(options, "/v1/images/generations", payload);
+  const images = mediaInputs.map((entry) => ({ type: "image_url", url: entry.url }));
+  if (images.length === 1) payload.image = images[0];
+  else payload.images = images;
+  return planJsonPost(options, "/v1/images/edits", payload);
+}
+
+function imageResponseFormat(options) {
+  const format = optionValue(options, "response_format", "responseFormat") ?? "url";
+  return validateOptionalValue(format, ["url", "b64_json"], "response format");
+}
+
+function assertSingleImageCount(value, model) {
+  if (value !== undefined && Number(value) !== 1) {
+    throw new Error(`--n for ${model} must be 1.`);
+  }
+}
+
+function geminiImageSize(size) {
+  const value = String(size).trim().toUpperCase();
+  const tiers = ["1K", "2K", "4K"];
+  const ratios = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+  if (tiers.includes(value)) return { responseModalities: ["TEXT", "IMAGE"], imageConfig: { imageSize: value } };
+  if (ratios.includes(value)) return { responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio: value } };
+  throw new Error(`Invalid Gemini --size: ${size}. Use 1K, 2K, 4K or a supported aspect ratio.`);
 }
 
 // gpt-image animation and complexity controls have no Gemini equivalent, so
@@ -128,16 +202,19 @@ const GPT_IMAGE_ONLY_OPTIONS = [
   ["complexity"],
 ];
 
-function assertGptImageOnlyOptions(options, model) {
+function assertGptImageOnlyOptions(options, model, family) {
   for (const aliases of GPT_IMAGE_ONLY_OPTIONS) {
-    if (optionValue(options, ...aliases) === undefined) continue;
+    const value = optionValue(options, ...aliases);
+    if (value === undefined) continue;
+    if (aliases[0] === "output_format") {
+      validateOptionalValue(value, IMAGE_OUTPUT_FORMATS, "output format");
+      if (family === "seedream" && ["png", "jpeg"].includes(value)) continue;
+    }
     const flag = `--${aliases[0].replaceAll("_", "-")}`;
-    throw new Error(`${flag} is only supported by gpt image models, not ${model}.`);
+    const supported = aliases[0] === "output_format" && ["png", "jpeg"].includes(value)
+      ? "gpt and Seedream 5.x image models" : "gpt image models";
+    throw new Error(`${flag} is only supported by ${supported}, not ${model}.`);
   }
-}
-
-function isSeedreamImageModel(model) {
-  return /seedream/i.test(String(model ?? ""));
 }
 
 function imageMimeType(entry) {
@@ -158,18 +235,25 @@ export function getVideo(options, taskId) {
 }
 
 export function planVideoRequest(options) {
-  const model = options.model ?? "seedance-2.0-pro";
+  const model = options.model ?? PREFERRED_MEDIA_MODELS.video[0];
   const mediaInputs = orderedMediaInputs(options);
   assertReferenceLimits(mediaInputs, "video", model);
-  if (mediaInputs.some((entry) => entry.role === "first_frame" && entry.kind === "video")
-    || mediaInputs.some((entry) => entry.role === "last_frame" && entry.kind === "video")) {
+  const supportsRoles = isSeedanceModel(model) || isMiniMaxModel(model);
+  if (mediaInputs.some((entry) => entry.kind === "video" && ["first_frame", "last_frame"].includes(videoInputRole(entry)))) {
     throw new Error("Video first-frame and last-frame inputs must be images.");
+  }
+  if (!supportsRoles) {
+    const unsupported = mediaInputs.find((entry) => videoInputRole(entry) !== "reference_image" || entry.kind === "video");
+    if (unsupported) {
+      const role = videoInputRole(unsupported).replaceAll("_", " ");
+      throw new FlatkeyError(`The CLI cannot send ${role} inputs with video model ${model}.`, { code: "unsupported_video_input" });
+    }
+    if (/(?:^|\/)grok-imagine-video(?:$|[-.])/i.test(model) && mediaInputs.length > 1) {
+      throw new FlatkeyError(`Video model ${model} accepts one reference image through this CLI request.`, { code: "unsupported_video_input" });
+    }
   }
   const imageUrls = mediaInputs
     .filter((entry) => entry.kind !== "video")
-    .map((entry) => entry.url);
-  const videoUrls = mediaInputs
-    .filter((entry) => entry.kind === "video")
     .map((entry) => entry.url);
   const ratio = validateOptionalValue(
     optionValue(options, "ratio", "aspect")
@@ -177,6 +261,10 @@ export function planVideoRequest(options) {
     ["16:9", "9:16", "4:3", "3:4", "21:9", "1:1", "adaptive"],
     "ratio",
   );
+  if (isSeedance25Model(model) && ratio !== "adaptive"
+    && mediaInputs.some((entry) => videoInputRole(entry) === "first_frame")) {
+    throw new Error("Seedance 2.5 first-frame input requires an adaptive ratio. Omit --ratio or use --ratio adaptive.");
+  }
   const resolution = validateOptionalValue(
     options.resolution ?? (isMiniMaxModel(model) ? "768P" : undefined),
     isMiniMaxModel(model) ? ["768P", "2K"] : ["480p", "720p", "1080p"],
@@ -196,17 +284,17 @@ export function planVideoRequest(options) {
     quality: resolution,
     fps: parseOptionalInteger(options.fps),
     generate_audio: parseOptionalBoolean(options.generate_audio) ?? true,
-    omni_reference_task_type: isSeedance25Model(model) && mediaInputs.some((entry) => entry.kind === "video" || entry.role === "reference_image")
+    omni_reference_task_type: isSeedance25Model(model) && mediaInputs.some((entry) => ["reference_video", "reference_image"].includes(videoInputRole(entry)))
       ? "auto"
       : undefined,
     temp_url: true,
     images: !isSeedanceModel(model) && imageUrls.length > 0 ? imageUrls : undefined,
   });
-  const seedanceContent = buildSeedanceContent(options, mediaInputs);
-  if ((isSeedanceModel(model) || isMiniMaxModel(model)) && seedanceContent.length > 0) {
-    return planJsonPost(options, videoGenerationPath(model, videoUrls), cleanObject({
+  const content = supportsRoles ? buildSeedanceContent(options, mediaInputs) : [];
+  if (content.length > 0) {
+    return planJsonPost(options, videoGenerationPath(model), cleanObject({
       ...basePayload,
-      content: seedanceContent,
+      content,
     }));
   }
   return planJsonPost(options, "/v1/video/generations", basePayload);
@@ -214,6 +302,17 @@ export function planVideoRequest(options) {
 
 export function planVideoStatusRequest(options, taskId) {
   return planRequest(options, `/v1/videos/${encodeURIComponent(taskId)}`);
+}
+
+export function planVideoContentRequest(options, taskId) {
+  return planRequest(options, `/v1/videos/${encodeURIComponent(taskId)}/content`);
+}
+
+export async function fetchVideoContent(options, taskId) {
+  const { url, method, headers } = planVideoContentRequest(options, taskId);
+  const response = await fetchWithRetry(options, url, { method, headers });
+  if (!response.ok) throw responseError(response, await readJson(response));
+  return response;
 }
 
 export function generateAudio(options) {
@@ -295,6 +394,11 @@ export function getModels(options) {
   }, "/v1/available_models");
 }
 
+export function getPublicModelPricing(options) {
+  return requestJson({ ...options, apiKey: undefined, baseUrl: options.baseUrl ?? DEFAULT_CONSOLE_URL },
+    "/api/website/pricing?group=plg");
+}
+
 export async function createDeviceAuthorization(options) {
   return requestJson({
     ...options,
@@ -343,10 +447,10 @@ function planRequest(options, path, init = {}) {
 }
 
 async function requestJsonFromPlan(options, plan) {
-  const fetchImpl = options.fetch ?? fetch;
   const request = {
     method: plan.method,
     headers: plan.headers,
+    ...(options.signal ? { signal: options.signal } : {}),
     body: plan.body === undefined
       ? undefined
       : isFormData(plan.body)
@@ -354,17 +458,68 @@ async function requestJsonFromPlan(options, plan) {
         : JSON.stringify(plan.body),
   };
   logRequest(options, plan.url, request);
-  const response = await fetchImpl(plan.url, request);
+  const response = await fetchWithRetry(options, plan.url, request);
   logResponse(options, response);
   const body = await readJson(response);
   logResponseBody(options, body);
   if (!response.ok || body?.success === false) {
-    throw new FlatkeyError(extractErrorMessage(body, response.status), {
-      status: response.status,
-      code: body?.code ?? body?.error?.code,
-    });
+    throw responseError(response, body);
   }
+  if (body && typeof body === "object") jsonResponseMetadata.set(body, httpMetadata(response, body));
   return body;
+}
+
+function retryAfterMs(response) {
+  const value = response.headers?.get?.("retry-after")?.trim();
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
+}
+
+function httpMetadata(response, body) {
+  return {
+    status: response.status,
+    requestId: response.headers?.get?.("x-oneapi-request-id") ?? response.headers?.get?.("x-request-id")
+      ?? body?.request_id ?? body?.error?.request_id ?? undefined,
+  };
+}
+
+export function responseError(response, body, fallback = {}) {
+  return new FlatkeyError(fallback.message ?? extractErrorMessage(body, response.status), {
+    ...httpMetadata(response, body),
+    code: body?.error?.code ?? body?.code ?? fallback.code ?? (response.ok ? "api_error" : "http_error"),
+    retryAfterMs: retryAfterMs(response),
+  });
+}
+
+// An explicit throttle rejects the request. A lost response or gateway failure
+// can follow an accepted generation, so only read requests replay those cases.
+export async function fetchWithRetry(options, url, init = {}) {
+  const fetchImpl = options.fetch ?? fetch;
+  const readOnly = ["GET", "HEAD"].includes(init.method ?? "GET");
+  for (let attempt = 0; ; attempt++) {
+    let response;
+    try {
+      response = await fetchImpl(url, init);
+    } catch (error) {
+      const networkFailure = error instanceof TypeError || Boolean(error.cause?.code || error.code);
+      if (!networkFailure || init.signal?.aborted || error.name === "AbortError") throw error;
+      if (!readOnly || attempt >= 2) {
+        throw new FlatkeyError(error.message, { code: "network_error", cause: error });
+      }
+    }
+    let delay = 500 * 2 ** attempt;
+    if (response) {
+      const transient = response.status === 429 || (readOnly && [408, 500, 502, 503, 504].includes(response.status));
+      if (!transient || attempt >= 2) return response;
+      delay = retryAfterMs(response) ?? delay;
+      if (delay > 30_000) return response;
+      await response.body?.cancel?.();
+    }
+    if (options.sleep) await options.sleep(delay);
+    else await sleep(delay, undefined, { signal: init.signal });
+  }
 }
 
 function isFormData(value) {
@@ -372,22 +527,18 @@ function isFormData(value) {
 }
 
 async function requestBinaryArtifactFromPlan(options, plan) {
-  const fetchImpl = options.fetch ?? fetch;
   const request = {
     method: plan.method,
     headers: plan.headers,
     body: plan.body === undefined ? undefined : JSON.stringify(plan.body),
   };
   logRequest(options, plan.url, request);
-  const response = await fetchImpl(plan.url, request);
+  const response = await fetchWithRetry(options, plan.url, request);
   logResponse(options, response);
   if (!response.ok) {
     const body = await readJson(response);
     logResponseBody(options, body);
-    throw new FlatkeyError(extractErrorMessage(body, response.status), {
-      status: response.status,
-      code: body?.code ?? body?.error?.code,
-    });
+    throw responseError(response, body);
   }
   return {
     data: [{ data: Buffer.from(await response.arrayBuffer()).toString("base64") }],
@@ -402,7 +553,7 @@ function logRequest(options, url, request) {
     : isFormData(request.body)
       ? "<form-data>"
       : request.body;
-  options.verboseLog?.(`-> ${request.method} ${url}`);
+  options.verboseLog?.(`-> ${request.method} ${url.replace(/([?&]key=)[^&]*/ig, "$1<redacted>")}`);
   options.verboseLog?.(`headers: ${JSON.stringify(safeHeaders)}`);
   if (safeBody !== undefined) {
     options.verboseLog?.(`body: ${safeBody}`);
@@ -422,7 +573,8 @@ function logResponseBody(options, body) {
 function redactHeaders(headers) {
   return Object.fromEntries(Object.entries(headers ?? {}).map(([key, value]) => [
     key,
-    key.toLowerCase() === "authorization" ? "Bearer <redacted>" : `${value}`,
+    key.toLowerCase() === "authorization" ? "Bearer <redacted>"
+      : key.toLowerCase() === "x-goog-api-key" ? "<redacted>" : `${value}`,
   ]));
 }
 
@@ -504,11 +656,18 @@ function isMiniMaxModel(model) {
   return /^minimax-h3$/i.test(model);
 }
 
-function videoGenerationPath(model, videoUrls = []) {
+function videoGenerationPath(model) {
   // Seedance keeps text, image, and video-reference content on /v1/videos.
   // The legacy route does not reliably fetch video references upstream.
   if (isSeedanceModel(model)) return "/v1/videos";
   return "/v1/video/generations";
+}
+
+function videoInputRole(entry) {
+  if (entry.role) return entry.role;
+  const name = entry.name?.replace(/_url$/, "");
+  if (name === "first_frame" || name === "last_frame") return name;
+  return entry.kind === "video" ? "reference_video" : "reference_image";
 }
 
 function buildSeedanceContent(options, mediaInputs = orderedMediaInputs(options)) {
@@ -518,10 +677,10 @@ function buildSeedanceContent(options, mediaInputs = orderedMediaInputs(options)
   }
   for (const entry of mediaInputs) {
     if (entry.kind === "video") {
-      content.push({ type: "video_url", video_url: { url: entry.url }, role: entry.role ?? "reference_video" });
+      content.push({ type: "video_url", video_url: { url: entry.url }, role: videoInputRole(entry) });
       continue;
     }
-    content.push({ type: "image_url", image_url: { url: entry.url }, role: entry.role ?? "reference_image" });
+    content.push({ type: "image_url", image_url: { url: entry.url }, role: videoInputRole(entry) });
   }
   return content;
 }

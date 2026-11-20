@@ -9,7 +9,9 @@ test("package exposes @flatkey-ai/cli flatkey binary", async () => {
 
   assert.equal(pkg.name, "@flatkey-ai/cli");
   assert.equal(pkg.bin.flatkey, "bin/flatkey.js");
-  assert.ok((binStat.mode & 0o111) !== 0);
+  assert.ok(binStat.isFile());
+  assert.match(await readFile(pkg.bin.flatkey, "utf8"), /^#!\/usr\/bin\/env node/);
+  if (process.platform !== "win32") assert.ok((binStat.mode & 0o111) !== 0);
 });
 
 test("release channel docs exist", async () => {
@@ -22,8 +24,8 @@ test("release channel docs exist", async () => {
 test("github workflow publishes npm with secret token", async () => {
   const workflow = await readFile(".github/workflows/npm-publish.yml", "utf8");
 
-  assert.match(workflow, /on:\n\s+workflow_dispatch:/);
-  assert.match(workflow, /tags:\n\s+- "v\*"/);
+  assert.match(workflow, /on:\r?\n\s+workflow_dispatch:/);
+  assert.match(workflow, /tags:\r?\n\s+- "v\*"/);
   assert.match(workflow, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
   assert.match(workflow, /npm publish --access public/);
 });

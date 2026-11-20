@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const BIN = new URL("../bin/flatkey.js", import.meta.url).pathname;
+const BIN = fileURLToPath(new URL("../bin/flatkey.js", import.meta.url));
 const LIVE = process.env.FLATKEY_LIVE_TESTS === "1";
 
 const cases = [

@@ -16,8 +16,10 @@ JSON mode:
 Commands:
 - flatkey image generate --prompt "<prompt>" --json [--model <model>] [--file <path>] [--image-url <url>] [--output image.png]
 - flatkey image generate --prompt "<prompt>" --json --model gpt-image-2.6 --output-format gif [--frame-count 9] [--frame-duration-ms 200] [--quality high] [--complexity low] [--output loop.gif]
-- flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--file <path>] [--image-url <url>] [--video-url <url>] [--ratio 16:9] [--resolution 720p] [--output video.mp4]
+- flatkey video generate --prompt "<prompt>" --json [--model seedance2] [--file <path>] [--image-url <url>] [--video-url <url>] [--ratio 16:9] [--resolution 720p] [--no-wait] [--output video.mp4]
 - flatkey video copy --source input.mp4 --json [--model seedance2] [--frame-ratio 80] [--depth-resolution 480p] [--output video.mp4]
+- flatkey video status <task-id> --json
+- flatkey video download <task-id> --output video.mp4 --json
 - flatkey audio generate --prompt "<text>" --json [--voice-id <voice_id>] [--model eleven_multilingual_v2] [--output speech.mp3]
 - flatkey audio sfx --prompt "<sound>" --json [--duration <seconds>] [--output sfx.mp3]
 - flatkey audio music --prompt "<music prompt>" --json [--music-length-ms <ms>] [--output music.mp3]
@@ -25,7 +27,7 @@ Commands:
 - flatkey text generate --prompt "<prompt>" --json [--model gpt-5.5] [--output text.txt]
 - flatkey credits --json
 - flatkey status --json
-- flatkey models --json [--type image|video|audio|text]
+- flatkey models --json [--type image|video|audio|text] [--pricing]
 - flatkey login [--no-open] [--console-url <url>]
 - flatkey logout
 - flatkey auth status --json
@@ -36,10 +38,14 @@ Environment:
 - ROUTER_ORIGIN: Override generation router origin, e.g. staging router.
 - CONSOLE_ORIGIN: Override console API origin, e.g. staging console.
 - Default router: https://router.flatkey.ai
+- FLATKEY_VIDEO_WAIT_TIMEOUT_MS controls how long generate waits for a video (default 600000).
 
 Recovery:
 - Missing key: create one at https://console.flatkey.ai/keys, then run flatkey onboard --api-key <key> or set FLATKEY_API_KEY.
-- Unknown model: run flatkey models --json, then retry with a listed model id.
+- Image and video commands select a compatible model from the account catalog. Set --model to use a specific model. An offline --dry-run previews the route without submitting or uploading media.
+- Blocked images and empty image results exit with an error. JSON errors retain the available code, HTTP status and requestId.
+- When a video error includes taskId, use video status and video download with that ID.
+- Use --no-wait with video generate or video copy to get a task ID as soon as the service accepts an asynchronous job.
 - Unknown voice: run flatkey audio voices --json, then retry with a listed voice_id.
 - API failure: inspect stderr JSON or HTTP message, then retry only after fixing request or credits.
 `;
@@ -57,6 +63,8 @@ Commands:
   image upload --file <path>     Upload local image and return a temporary URL
   video generate --prompt <txt>  Generate video
   video copy --source <mp4>       Recreate a 5-15s video from Depth Anything V2 motion
+  video status <task-id>          Show the current video task state
+  video download <task-id>        Save a completed video
   audio generate --prompt <txt>  Generate speech with ElevenLabs voices
   audio sfx --prompt <txt>       Generate sound effects
   audio music --prompt <txt>     Generate music
@@ -73,6 +81,7 @@ Global options:
   --image-url <url>               Add remote image input, repeatable
   --video-url <url>               Add remote video input, repeatable
   --output, -o <file>             Write generated output to a local file
+  --dry-run                      Preview a media request offline
   --verbose                      Print request/response logs to stderr
   --base-url <url>               Override Flatkey router URL
 
@@ -83,7 +92,8 @@ Environment:
 
 Video options:
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, 1:1, or adaptive
-  --resolution <value>            480p, 720p, or 1080p
+  --resolution <value>            768P (default) or 2K for MiniMax H3. Other models accept 480p, 720p, 1080p
+  --no-wait                      Return the task ID when an asynchronous video is submitted
 
 Image options (gpt image models):
   --size <size>                   Image size, e.g. 1024x1024
@@ -169,15 +179,16 @@ Options:
 
 Options:
   --file <path>                  Local image file to upload
+  --dry-run                      Preview the upload offline
   --json                         Print machine-readable JSON`,
   "image generate": `Usage: flatkey image generate --prompt <txt> [options]
 
 Options:
-  --model <model>                Model id
-  --size <size>                  Image size for OpenAI-style image models
+  --model <model>                Account model id for GPT Image, Gemini, Seedream, or Grok
+  --size <size>                  Model-specific image size or resolution
   --quality <quality>             Image quality for supported models
   --n <count>                    Number of images for supported models
-  --output-format <format>        png, jpeg, webp, or gif; gpt image models only
+  --output-format <format>        png, jpeg, webp or gif for GPT Image. Seedream 5 accepts png or jpeg
   --frame-count <count>           Animation frames for gif output, gpt image models only
   --frame-duration-ms <ms>        Milliseconds per gif frame, gpt image models only
   --complexity <level>            Animation complexity, e.g. low; gpt image models only
@@ -189,6 +200,7 @@ Options:
 
 Options:
   --type <type>                  Filter: image, video, audio, or text
+  --pricing                      Show published PLG rates in USD
   --json                         Print machine-readable JSON`,
   login: `Usage: flatkey login [options]
 
@@ -236,12 +248,15 @@ Options:
 Commands:
   generate --prompt <txt>        Generate video
   copy --source <mp4>            Recreate a 5-15s video from local depth motion
+  status <task-id>               Show the current video task state
+  download <task-id>             Save a completed video
 
 Options:
-  --model <model>                Model id, default seedance-2.0-pro
+  --model <model>                Select a video model available to your account
   --duration <seconds>            Video duration
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, 1:1, or adaptive
-  --resolution <value>            480p, 720p, or 1080p
+  --resolution <value>            768P (default) or 2K for MiniMax H3. Other models accept 480p, 720p, 1080p
+  --no-wait                      Return the task ID when an asynchronous video is submitted
   --generate-audio <true|false>   Generate audio, default true
   --output, -o <file>             Write video file
   --json                         Print machine-readable JSON`,
@@ -253,11 +268,12 @@ Options:
   --depth-resolution <value>      original, 480p, or 320p; default 480p
   --depth-location <dir>          Directory for temporary depth video files
   --keep-depth                    Keep generated depth video and reference frames
-  --model <model>                Model id, default seedance-2.0-pro
+  --model <model>                Select a video model available to your account
   --prompt <txt>                 Prompt override for copy generation
   --duration <seconds>            Must match source duration, 5-15 seconds
   --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
-  --resolution <value>            480p, 720p, or 1080p
+  --resolution <value>            768P (default) or 2K for MiniMax H3. Other models accept 480p, 720p, 1080p
+  --no-wait                      Return the task ID when an asynchronous video is submitted
   --generate-audio <true|false>   Generate audio, default true
   --fps <fps>                    Frames per second
   --output, -o <file>             Write video file
@@ -265,14 +281,15 @@ Options:
   "video generate": `Usage: flatkey video generate --prompt <txt> [options]
 
 Options:
-  --model <model>                Model id, default seedance-2.0-pro
+  --model <model>                Select a video model available to your account
   --duration <seconds>            Video duration
-  --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, or 1:1
-  --resolution <value>            480p, 720p, or 1080p
+  --ratio <value>                 16:9, 9:16, 4:3, 3:4, 21:9, 1:1, or adaptive. Seedance 2.5 first frames use adaptive
+  --resolution <value>            768P (default) or 2K for MiniMax H3. Other models accept 480p, 720p, 1080p
+  --no-wait                      Return the task ID when an asynchronous video is submitted
   --generate-audio <true|false>   Generate audio, default true
   --image <file>                  Upload local reference image, repeatable
   --image-url <url>               Add reference image URL, repeatable
-  --file <path>                   Local image or video input, repeatable
+  --file <path>                   Local reference image or video, repeatable
   --first-frame <file>            Upload local first frame image
   --video-url <url>               Add reference video URL, repeatable; Seedance 2.5 supports up to 10
   --first-frame-url <url>         Add first frame image URL
@@ -281,6 +298,12 @@ Options:
   --fps <fps>                    Frames per second
   --output, -o <file>             Write video file
   --json                         Print machine-readable JSON`,
+  "video status": `Usage: flatkey video status <task-id> [--json]
+
+Use --task-id <id> or supply the ID after status. This queries the existing task once.`,
+  "video download": `Usage: flatkey video download <task-id> [-o <file>] [--json]
+
+Use --task-id <id> or supply the ID after download. The command checks the task state and saves the completed video.`,
 };
 
 export function getCommandHelp(group, action) {

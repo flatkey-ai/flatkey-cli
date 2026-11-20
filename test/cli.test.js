@@ -815,6 +815,7 @@ test("video generation uploads local image references before request", async () 
     options: {
       prompt: "clip",
       image: [image],
+      model: "seedance2",
       api_key: "key",
       base_url: "https://router.test",
       out: dir,
@@ -866,6 +867,7 @@ test("video copy uploads the generated depth video as the primary reference", as
     options: {
       source: join(dir, "input.mp4"),
       frame_ratio: "80",
+      model: "seedance2",
       depth_resolution: "480p",
       api_key: "key",
       base_url: "https://router.test",
@@ -934,6 +936,7 @@ test("video copy falls back to depth keyframes only for video-fetch failures", a
     options: {
       source: join(dir, "input.mp4"),
       api_key: "key",
+      model: "seedance2",
       base_url: "https://router.test",
       out: dir,
       json: true,
@@ -985,63 +988,33 @@ test("video copy falls back to depth keyframes only for video-fetch failures", a
 });
 
 test("video dry-run preserves mixed media input order", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "flatkey-video-order-"));
-  const image = join(dir, "a.png");
-  const video = join(dir, "c.mp4");
-  await writeFile(image, "image-bytes");
-  await writeFile(video, "video-bytes");
-
   const result = await runCommand(parseArgv([
     "video",
     "generate",
+    "--model",
+    "seedance-2-5-pro",
     "--prompt",
     "clip",
     "--file",
-    image,
+    "a.png",
     "--image-url",
     "https://example.com/b.png",
     "--file",
-    video,
+    "c.mp4",
     "--video-url",
     "https://example.com/d.mp4",
     "--dry-run",
     "--json",
   ]), {
-    api_key: "key",
-    base_url: "https://router.test",
-    fetch: async (url, init) => {
-      if (init?.method === "HEAD") {
-        if (url === "https://example.com/b.png") {
-          return {
-            ok: true,
-            status: 200,
-            headers: { get: () => "image/png" },
-          };
-        }
-        if (url === "https://example.com/d.mp4") {
-          return {
-            ok: true,
-            status: 200,
-            headers: { get: () => "video/mp4" },
-          };
-        }
-      }
-      if (url.endsWith("/v1/temp-media/images")) {
-        return jsonResponse({ success: true, data: { signed_url: "https://storage.test/a.png" } });
-      }
-      if (url.endsWith("/v1/temp-media/videos")) {
-        return jsonResponse({ success: true, data: { signed_url: "https://storage.test/c.mp4" } });
-      }
-      return jsonResponse({});
-    },
+    fetch: () => assert.fail("dry-run issued a network request"),
   });
 
   assert.equal(result.dryRun, true);
   assert.deepEqual(result.request.body.content, [
     { type: "text", text: "clip" },
-    { type: "image_url", image_url: { url: "https://storage.test/a.png" }, role: "reference_image" },
+    { type: "image_url", image_url: { url: "<upload: a.png>" }, role: "reference_image" },
     { type: "image_url", image_url: { url: "https://example.com/b.png" }, role: "reference_image" },
-    { type: "video_url", video_url: { url: "https://storage.test/c.mp4" }, role: "reference_video" },
+    { type: "video_url", video_url: { url: "<upload: c.mp4>" }, role: "reference_video" },
     { type: "video_url", video_url: { url: "https://example.com/d.mp4" }, role: "reference_video" },
   ]);
 });
@@ -1089,17 +1062,7 @@ test("video generation accepts expanded Seedance 2.5 reference inputs", async ()
     "--dry-run",
     "--json",
   ]), {
-    api_key: "key",
-    fetch: async (url, init) => {
-      if (init?.method === "HEAD") {
-        return {
-          ok: true,
-          status: 200,
-          headers: { get: () => "image/png" },
-        };
-      }
-      return jsonResponse({});
-    },
+    fetch: () => assert.fail("dry-run issued a network request"),
   });
 
   assert.equal(result.request.body.model, "seedance-2-5-pro");
@@ -1108,10 +1071,6 @@ test("video generation accepts expanded Seedance 2.5 reference inputs", async ()
 });
 
 test("video generation accepts Seedance 2.5 mov references", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "flatkey-seedance25-mov-"));
-  const video = join(dir, "reference.mov");
-  await writeFile(video, "video-bytes");
-
   const result = await runCommand(parseArgv([
     "video",
     "generate",
@@ -1120,22 +1079,16 @@ test("video generation accepts Seedance 2.5 mov references", async () => {
     "--prompt",
     "clip",
     "--file",
-    video,
+    "reference.mov",
     "--dry-run",
     "--json",
   ]), {
-    api_key: "key",
-    fetch: async (url, init) => {
-      if (url.endsWith("/v1/temp-media/videos")) {
-        return jsonResponse({ data: { signed_url: "https://storage.test/reference.mov" } });
-      }
-      return jsonResponse({});
-    },
+    fetch: () => assert.fail("dry-run issued a network request"),
   });
 
   assert.deepEqual(result.request.body.content, [
     { type: "text", text: "clip" },
-    { type: "video_url", video_url: { url: "https://storage.test/reference.mov" }, role: "reference_video" },
+    { type: "video_url", video_url: { url: "<upload: reference.mov>" }, role: "reference_video" },
   ]);
 });
 
@@ -1335,7 +1288,8 @@ test("main warns on stderr when a newer npm version is available", async () => {
   let stderr = "";
   const calls = [];
 
-  await main(["image", "generate", "--prompt", "poster", "--dry-run"], {
+  await main(["auth", "status", "--api-key", "test-key"], {
+    configDir: join(tmpdir(), "flatkey-no-config-for-update-test"),
     stdout: { write: (chunk) => { stdout += chunk; } },
     stderr: { write: (chunk) => { stderr += chunk; } },
     fetch: async (url, init) => {
@@ -1344,7 +1298,7 @@ test("main warns on stderr when a newer npm version is available", async () => {
     },
   });
 
-  assert.match(stdout, /https:\/\/router\.flatkey\.ai\/v1beta\/models\/nano-banana-pro-preview:generateContent/);
+  assert.match(stdout, /Authenticated via option/);
   assert.equal(calls[0].url, "https://registry.npmjs.org/@flatkey-ai%2fcli/latest");
   assert.equal(calls[0].init.headers["x-flatkey-client"], "cli");
   assert.match(stderr, new RegExp(`Flatkey CLI update available: ${pkg.version.replaceAll(".", "\\.")} -> 99\\.0\\.0`));

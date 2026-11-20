@@ -1,6 +1,10 @@
 import { join } from "node:path";
-import { DEFAULT_BASE_URL } from "./api.js";
-import { nextArtifactPath, persistArtifacts } from "./artifacts.js";
+import { mediaModelCandidates, PREFERRED_MEDIA_MODELS } from "./models.js";
+import {
+  DEFAULT_BASE_URL, DEFAULT_CONSOLE_URL, fetchVideoContent, fetchWithRetry, FlatkeyError, getModels, getResponseMetadata, getVideo, planVideoContentRequest,
+  planVideoStatusRequest, responseError,
+} from "./api.js";
+import { persistArtifacts } from "./artifacts.js";
 
 const COMMANDS = new Set([
   "audio",
@@ -19,6 +23,7 @@ const COMMANDS = new Set([
 ]);
 
 const GROUP_ACTIONS = new Set(["audio", "auth", "image", "text", "video"]);
+const BOOLEAN_OPTIONS = new Set(["ai", "dry_run", "help", "json", "keep_depth", "no_open", "no_wait", "open", "pricing", "verbose"]);
 const GLOBAL_OPTIONS = new Set(["api_key", "base_url", "console_url", "dry_run", "help", "json", "output", "out", "verbose"]);
 const REPEATABLE_OPTIONS = new Set(["image", "image_url", "video_url"]);
 const MEDIA_INPUT_OPTIONS = new Set(["file", "image", "image_url", "video_url", "first_frame", "first_frame_url", "last_frame", "last_frame_url"]);
@@ -36,15 +41,17 @@ const COMMAND_OPTIONS = {
   "image upload": new Set(["file"]),
   login: new Set(["console_url", "no_open", "open"]),
   logout: new Set([]),
-  models: new Set(["type"]),
+  models: new Set(["type", "pricing"]),
   onboard: new Set(["api_key"]),
   status: new Set([]),
   text: new Set([]),
   "text generate": new Set(["model", "prompt"]),
   version: new Set([]),
   video: new Set([]),
-  "video generate": new Set(["aspect", "duration", "file", "first_frame", "first_frame_url", "fps", "generate_audio", "image", "image_url", "last_frame", "last_frame_url", "model", "prompt", "ratio", "resolution", "video_url"]),
-  "video copy": new Set(["aspect", "depth_location", "depth_model", "depth_resolution", "duration", "fps", "frame_ratio", "generate_audio", "keep_depth", "model", "prompt", "ratio", "resolution", "source"]),
+  "video generate": new Set(["aspect", "duration", "file", "first_frame", "first_frame_url", "fps", "generate_audio", "image", "image_url", "last_frame", "last_frame_url", "model", "no_wait", "prompt", "ratio", "resolution", "video_url"]),
+  "video copy": new Set(["aspect", "depth_location", "depth_model", "depth_resolution", "duration", "fps", "frame_ratio", "generate_audio", "keep_depth", "model", "no_wait", "prompt", "ratio", "resolution", "source"]),
+  "video status": new Set(["task_id"]),
+  "video download": new Set(["task_id"]),
 };
 
 export function parseArgv(argv) {
@@ -78,6 +85,12 @@ export function parseArgv(argv) {
   }
   const action = hasAction ? maybeAction : undefined;
   const optionTokens = hasAction ? rest : argv.slice(1);
+  if (isVideoTaskCommand(group, action) && optionTokens[0] && !optionTokens[0].startsWith("-") && !isHelpToken(optionTokens[0])) {
+    if (optionTokens.some((token) => token === "--task-id" || token.startsWith("--task-id="))) {
+      throw new Error("Specify the video task ID once.");
+    }
+    optionTokens.unshift("--task-id");
+  }
   const hasHelpOption = optionTokens.some((token) => token === "--help" || token === "-h")
     || (optionTokens.length === 1 && optionTokens[0] === "help");
   if (hasHelpOption) {
@@ -100,6 +113,10 @@ export function parseArgv(argv) {
 
 function isHelpToken(token) {
   return token === "help" || token === "--help" || token === "-h";
+}
+
+function isVideoTaskCommand(group, action) {
+  return group === "video" && (action === "status" || action === "download");
 }
 
 function parseOptions(tokens, repeatableOptions = REPEATABLE_OPTIONS) {
@@ -125,7 +142,8 @@ function parseOptions(tokens, repeatableOptions = REPEATABLE_OPTIONS) {
     if (separator === -1) {
       name = token.slice(2).replaceAll("-", "_");
       const next = tokens[index + 1];
-      if (!next || next.startsWith("--")) {
+      const bareSwitch = BOOLEAN_OPTIONS.has(name) && next !== "true" && next !== "false";
+      if (bareSwitch || !next || next.startsWith("--") || next === "-o" || next === "-h") {
         options[name] = true;
         continue;
       }
@@ -140,6 +158,12 @@ function parseOptions(tokens, repeatableOptions = REPEATABLE_OPTIONS) {
       if (!value) {
         throw new Error(`Missing value for --${name.replaceAll("_", "-")}.`);
       }
+    }
+    if (BOOLEAN_OPTIONS.has(name)) {
+      if (value !== "true" && value !== "false") {
+        throw new Error(`Invalid value for --${name.replaceAll("_", "-")}. Use true or false.`);
+      }
+      value = value === "true";
     }
     if (repeatableOptions.has(name)) {
       options[name] = [...asArray(options[name]), value];
@@ -258,6 +282,10 @@ export async function runCommand(command, deps = {}) {
 
   if (command.group === "credits" || command.group === "status") {
     return handleUtility(command, { ...deps, stdout, stderr });
+  }
+
+  if (isVideoTaskCommand(command.group, command.action)) {
+    return handleVideoTask(command, { ...deps, stderr });
   }
 
   if (["image", "video", "audio", "text"].includes(command.group)) {
@@ -480,19 +508,31 @@ async function handleImageUpload(command, deps) {
   if (!media || media.kind !== "image") {
     throw new Error(`Unsupported image file type: ${file}`);
   }
-  const apiKey = await resolveApiKey({
-    apiKey: command.options.api_key,
-    env: deps.env ?? process.env,
-    configDir: deps.configDir,
-  });
   const { consoleOrigin } = await resolveOrigins({
     consoleUrl: command.options.console_url,
     env: deps.env ?? process.env,
     configDir: deps.configDir,
   });
+  const baseUrl = consoleOrigin ?? DEFAULT_CONSOLE_URL;
+  if (command.options.dry_run) {
+    return {
+      kind: "upload",
+      dryRun: true,
+      request: {
+        method: "POST",
+        url: `${baseUrl.replace(/\/$/, "")}/v1/temp-media/images`,
+        body: { file, contentType: media.contentType },
+      },
+    };
+  }
+  const apiKey = await resolveApiKey({
+    apiKey: command.options.api_key,
+    env: deps.env ?? process.env,
+    configDir: deps.configDir,
+  });
   const response = await uploadTempMediaImage({
     apiKey,
-    baseUrl: consoleOrigin ?? DEFAULT_CONSOLE_URL,
+    baseUrl,
     file: await readFile(await expandHomePath(file)),
     filename: basename(file),
     contentType: media.contentType,
@@ -516,6 +556,10 @@ async function handleImageUpload(command, deps) {
 }
 
 async function handleGenerate(command, deps) {
+  const isVideoCopy = command.group === "video" && command.action === "copy";
+  if (isVideoCopy && !command.options.source) {
+    throw new Error("Missing --source value. Run `flatkey video copy --help` to see supported options.");
+  }
   const { resolveApiKey, resolveOrigins } = await import("./config.js");
   const {
     generateAudio,
@@ -524,8 +568,6 @@ async function handleGenerate(command, deps) {
     generateImage,
     generateText,
     generateVideo,
-    DEFAULT_CONSOLE_URL,
-    getVideo,
     planAudioMusicRequest,
     planAudioRequest,
     planAudioSfxRequest,
@@ -536,15 +578,14 @@ async function handleGenerate(command, deps) {
     uploadTempMediaVideo,
   } = await import("./api.js");
   const { createAnimation } = await import("./animation.js");
-  const { prepareVideoCopy } = await import("./video-copy.js");
   const apiKey = command.options.dry_run
-    ? (command.options.api_key ?? "FLATKEY_API_KEY")
+    ? "FLATKEY_API_KEY"
     : await resolveApiKey({
         apiKey: command.options.api_key,
         env: deps.env ?? process.env,
         configDir: deps.configDir,
       });
-  const { routerOrigin } = await resolveOrigins({
+  const { routerOrigin, consoleOrigin } = await resolveOrigins({
     baseUrl: command.options.base_url,
     consoleUrl: command.options.console_url,
     env: deps.env ?? process.env,
@@ -562,17 +603,35 @@ async function handleGenerate(command, deps) {
     tempMediaBaseUrl: tempMediaBaseUrl ?? DEFAULT_CONSOLE_URL,
     env: deps.env ?? process.env,
     fetch: deps.fetch,
+    sleep: deps.sleep,
     verboseLog: verboseLogger(deps.stderr, command.options.verbose),
   };
   if (Array.isArray(command.options.__media_inputs)) {
     options.__media_inputs = command.options.__media_inputs;
   }
+  const mediaDefaults = PREFERRED_MEDIA_MODELS[command.group];
+  if (mediaDefaults) {
+    const plan = command.group === "image" ? planImageRequest : planVideoRequest;
+    const planOptions = isVideoCopy ? {
+      ...options,
+      __media_inputs: [{ kind: "video", role: "reference_video", url: "<generated>/depth.mp4" }],
+    } : options;
+    options.model = await resolveMediaModel(command.group, planOptions, consoleOrigin, plan);
+  }
   let videoCopy;
-  if (command.group === "video" && command.action === "copy") {
-    if (!command.options.source) {
-      throw new Error("Missing --source value. Run `flatkey video copy --help` to see supported options.");
+  if (isVideoCopy) {
+    const { prepareVideoCopy, validateCopyDuration, parseDepthResolution, parseFrameRatio } = await import("./video-copy.js");
+    if (command.options.dry_run) {
+      parseDepthResolution(options.depth_resolution);
+      parseFrameRatio(options.frame_ratio);
+      videoCopy = {
+        source: options.source,
+        depthPath: "<generated>/depth.mp4",
+        duration: options.duration === undefined ? undefined : validateCopyDuration(options.duration, "--duration"),
+      };
+    } else {
+      videoCopy = await (deps.prepareVideoCopy ?? prepareVideoCopy)(command.options, deps);
     }
-    videoCopy = await (deps.prepareVideoCopy ?? prepareVideoCopy)(command.options, deps);
     options.prompt ??= "Recreate the reference video as faithfully as possible while following the supplied depth motion.";
     options.duration = videoCopy.duration;
     options.__media_inputs = [{
@@ -617,11 +676,12 @@ async function handleGenerate(command, deps) {
               ? planAudioMusicRequest(options)
               : planAudioRequest(options)
           : planTextRequest(options);
-    await videoCopy?.cleanup?.();
+    if (videoCopy && videoCopy.duration === undefined) request.body.duration = "<source duration>";
     return {
       dryRun: true,
       kind: command.group,
       request: redactRequest(request),
+      ...(mediaDefaults && !command.options.model ? { previewModel: options.model } : {}),
       videoCopy: scrubVideoCopy(videoCopy),
       copyReferenceMode: options.__copy_reference_mode,
     };
@@ -631,6 +691,7 @@ async function handleGenerate(command, deps) {
     stream: deps.stderr,
   });
   animation.start(command.group);
+  let taskId;
   try {
     let response;
     try {
@@ -645,11 +706,8 @@ async function handleGenerate(command, deps) {
                 ? await generateAudioMusic(options)
                 : await generateAudio(options)
             : await generateText(options);
-      response = command.group === "video"
-        ? await waitForVideoResult(response, { ...options, getVideo, sleep: deps.sleep })
-        : response;
     } catch (error) {
-      if (!videoCopy || options.__copy_reference_mode !== "depth-video" || !isDepthVideoFetchFailure(error)) {
+      if (error.taskId || !videoCopy || options.__copy_reference_mode !== "depth-video" || !isDepthVideoFetchFailure(error)) {
         throw error;
       }
       options.__media_inputs = (videoCopy.referencePaths ?? []).map((value, index) => ({
@@ -675,7 +733,13 @@ async function handleGenerate(command, deps) {
       });
       options.__copy_reference_mode = "depth-keyframes-fallback";
       response = await generateVideo(options);
-      response = await waitForVideoResult(response, { ...options, getVideo, sleep: deps.sleep });
+    }
+    if (command.group === "video") {
+      taskId = videoTaskId(response);
+      const task = videoTaskPayload(response);
+      const completed = completedVideoResult(response, options, taskId);
+      if (!completed && options.no_wait && taskId) return videoSubmissionReceipt(task, options, taskId);
+      response = completed ?? await waitForVideoResult(task, options, taskId);
     }
     const artifactResponse = response;
     if (command.group === "text") {
@@ -685,42 +749,96 @@ async function handleGenerate(command, deps) {
     }
     const outDir = command.options.out ?? "flatkey-output";
     const format = command.group === "image" ? command.options.output_format : undefined;
-    const output = command.options.output
-      ?? (command.group === "video" ? await nextArtifactPath({ kind: command.group, outDir }) : undefined);
     const artifacts = await persistArtifacts({
       kind: command.group,
       response: artifactResponse,
       outDir,
-      output,
+      output: command.options.output,
+      downloadRemote: command.group === "video",
       format,
-      fetch: deps.fetch,
+      fetch: command.group === "video" ? videoArtifactFetch(options, taskId) : (url, init) => fetchWithRetry(options, url, init),
     });
     return {
       kind: command.group,
+      ...(taskId ? { taskId } : {}),
+      ...(mediaDefaults ? { model: options.model } : {}),
       artifacts,
       response: scrubArtifactResponse(artifactResponse),
       ...(videoCopy ? { copyReferenceMode: options.__copy_reference_mode } : {}),
     };
+  } catch (error) {
+    if (!error.taskId && command.group === "video"
+      && (taskId || silentVideoHint(options, undefined, error.message, error.code))) {
+      throw videoTaskError(options, taskId, error.message, { cause: error });
+    }
+    throw error;
   } finally {
     animation.stop();
     await videoCopy?.cleanup?.();
   }
 }
 
+async function resolveMediaModel(kind, options, consoleOrigin, plan) {
+  if (options.model !== undefined) {
+    if (typeof options.model !== "string" || !options.model.trim()) throw new Error("Missing value for --model.");
+    plan(options);
+    return options.model;
+  }
+  const catalog = options.dry_run
+    ? { data: PREFERRED_MEDIA_MODELS[kind].map((id) => ({ id, type: kind })) }
+    : await getModels({ ...options, baseUrl: consoleOrigin ?? DEFAULT_CONSOLE_URL });
+  let lastReason;
+  for (const model of mediaModelCandidates(catalog, kind, options)) {
+    try {
+      plan({ ...options, model });
+      return model;
+    } catch (error) {
+      lastReason = error.message;
+    }
+  }
+  throw new FlatkeyError(
+    `No available ${kind} model for this request.${lastReason ? ` ${lastReason}` : ""} Run flatkey models --type ${kind} or specify --model.`,
+    { code: "no_available_model" },
+  );
+}
+
 async function prepareMediaInputs(command, options, deps) {
-  const mediaInputs = orderedMediaInputs(command, options);
+  const mediaInputs = orderedMediaInputs(command, options).map((input) => describeMediaInput(input, command.group));
   if (mediaInputs.length === 0) return;
   assertMediaReferenceLimit(mediaInputs, command.group, options.model);
 
   const resolved = [];
-  for (const input of mediaInputs) {
-    if (input.kind === "local") {
-      resolved.push(await uploadLocalMedia(input.value, command.group, deps, input.optionName ?? input.name));
+  for (const { local, ...input } of mediaInputs) {
+    if (command.options.dry_run) {
+      if (local) input.value = `<upload: ${input.value}>`;
+      input.mime ??= "<MIME determined on submission>";
+    } else if (local) {
+      input.value = await uploadLocalMedia(input, deps);
     } else {
-      resolved.push(await confirmRemoteMediaUrl(input.value, command.group, deps, input.name));
+      const media = await confirmRemoteMediaUrl(input.value, command.group, deps, input.name);
+      input.mime = media.contentType;
     }
+    resolved.push(input);
   }
   options.__media_inputs = resolved;
+}
+
+function describeMediaInput(input, commandGroup) {
+  const name = input.optionName ?? input.name;
+  const local = input.kind === "local";
+  const media = mediaInfoFromPath(local ? input.value : String(input.value).split(/[?#]/, 1)[0]);
+  if (local && (!media || !allowedMediaKindsForOption(commandGroup, name).has(media.kind))) {
+    throw new Error(`Unsupported --${name.replaceAll("_", "-")} file type for flatkey ${commandGroup} generate: ${input.value}`);
+  }
+  const kind = local ? media.kind : name === "video_url" ? "video" : "image";
+  return {
+    name,
+    value: input.value,
+    kind,
+    role: input.role ?? mediaRoleFromOption(name, kind),
+    mime: media?.kind === kind ? media.contentType : undefined,
+    local,
+  };
 }
 
 function assertMediaReferenceLimit(mediaInputs, commandGroup, model) {
@@ -782,51 +900,117 @@ function orderedMediaInputs(command, options) {
   return legacyInputs;
 }
 
-async function uploadLocalMedia(file, commandGroup, deps, optionName) {
+async function uploadLocalMedia(input, deps) {
   const { basename } = await import("node:path");
   const { readFile } = await import("node:fs/promises");
-  const media = mediaInfoFromPath(file);
-  const allowedKinds = allowedMediaKindsForOption(commandGroup, optionName);
-  if (!media || !allowedKinds.has(media.kind)) {
-    throw new Error(`Unsupported --${optionName.replaceAll("_", "-")} file type for flatkey ${commandGroup} generate: ${file}`);
-  }
-  const uploader = media.kind === "video" ? deps.uploadTempMediaVideo : deps.uploadTempMediaImage;
+  const uploader = input.kind === "video" ? deps.uploadTempMediaVideo : deps.uploadTempMediaImage;
   const response = await uploader({
     apiKey: deps.apiKey,
     baseUrl: deps.tempMediaBaseUrl ?? deps.baseUrl,
-    file: await readFile(await expandHomePath(file)),
-    filename: basename(file),
-    contentType: media.contentType,
+    file: await readFile(await expandHomePath(input.value)),
+    filename: basename(input.value),
+    contentType: input.mime,
     fetch: deps.fetch,
     verbose: deps.verbose,
     verboseLog: deps.verboseLog,
   });
   const url = extractUploadedMediaUrl(response);
-  if (!url) throw new Error(`Media upload failed: missing signed_url for ${file}`);
-  return {
-    name: optionName,
-    value: url,
-    kind: media.kind,
-    role: mediaRoleFromOption(optionName, media.kind),
-    mime: media.contentType,
-  };
+  if (!url) throw new Error(`Media upload failed: missing signed_url for ${input.value}`);
+  return url;
 }
 
 async function confirmRemoteMediaUrl(url, commandGroup, deps, optionName) {
   const fetchImpl = deps.fetch ?? fetch;
-  const response = await fetchImpl(url, { method: "HEAD" });
-  const media = mediaInfoFromMime(headerValue(response?.headers, "content-type"));
   const allowedKinds = allowedMediaKindsForOption(commandGroup, optionName);
-  if (!media || !allowedKinds.has(media.kind)) {
-    throw new Error(`Unsupported --${optionName.replaceAll("_", "-")} MIME type for flatkey ${commandGroup} generate: ${headerValue(response?.headers, "content-type") ?? "unknown"}`);
+  let head;
+  try {
+    head = await fetchImpl(url, { method: "HEAD", signal: AbortSignal.timeout(REMOTE_MEDIA_PROBE_TIMEOUT_MS) });
+  } catch {
+    // Object stores can sign the URL specifically for GET.
   }
-  return {
-    name: optionName,
-    value: url,
-    kind: media.kind,
-    role: mediaRoleFromOption(optionName, media.kind),
-    mime: media.contentType,
-  };
+  const declared = mediaInfoFromMime(headerValue(head?.headers, "content-type"));
+  if (isOkResponse(head) && declared && allowedKinds.has(declared.kind)) return declared;
+
+  const flag = `--${optionName.replaceAll("_", "-")}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REMOTE_MEDIA_PROBE_TIMEOUT_MS);
+  try {
+    const response = await fetchWithRetry(deps, url, {
+      method: "GET",
+      headers: { Range: `bytes=0-${REMOTE_MEDIA_PROBE_BYTES - 1}` },
+      signal: controller.signal,
+    });
+    const contentType = headerValue(response.headers, "content-type");
+    if (!isOkResponse(response)) {
+      throw responseError(response, undefined, {
+        message: `Could not fetch ${flag}: HTTP ${response.status}${contentType ? ` (${contentType})` : ""}`,
+        code: "media_fetch_failed",
+      });
+    }
+    const prefix = await readLeadingBytes(response);
+    const media = prefix === undefined ? mediaInfoFromMime(contentType) : mediaInfoFromBytes(prefix);
+    if (media && allowedKinds.has(media.kind)) return media;
+    throw new FlatkeyError(`Unsupported ${flag} MIME type for flatkey ${commandGroup} generate: ${contentType ?? "unknown"}`, {
+      code: "unsupported_media_type",
+    });
+  } catch (error) {
+    if (error instanceof FlatkeyError) throw error;
+    throw new FlatkeyError(`Could not fetch ${flag}: ${error.message}`, { code: "media_fetch_failed" });
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+const REMOTE_MEDIA_PROBE_BYTES = 64 * 1024;
+const REMOTE_MEDIA_PROBE_TIMEOUT_MS = 15_000;
+
+function isOkResponse(response) {
+  return response?.ok ?? (response?.status >= 200 && response?.status < 300);
+}
+
+async function readLeadingBytes(response) {
+  if (response.body === null) return Buffer.alloc(0);
+  const reader = response.body?.getReader?.();
+  if (!reader) return undefined;
+  const prefix = Buffer.alloc(REMOTE_MEDIA_PROBE_BYTES);
+  let length = 0;
+  try {
+    while (length < prefix.length) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value.subarray(0, prefix.length - length);
+      prefix.set(chunk, length);
+      length += chunk.length;
+    }
+    return prefix.subarray(0, length);
+  } finally {
+    // An origin can ignore Range and send the full video.
+    reader.cancel().catch(() => {});
+  }
+}
+
+function mediaInfoFromBytes(bytes) {
+  if (!bytes || bytes.length < 4) return undefined;
+  const ascii = (start, end) => bytes.subarray(start, end).toString("latin1");
+  if (bytes[0] === 0x89 && ascii(1, 4) === "PNG") return { kind: "image", contentType: "image/png" };
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return { kind: "image", contentType: "image/jpeg" };
+  if (ascii(0, 4) === "RIFF" && bytes.length >= 12 && ascii(8, 12) === "WEBP") return { kind: "image", contentType: "image/webp" };
+  if (ascii(0, 4) === "GIF8") return { kind: "image", contentType: "image/gif" };
+  if (ascii(0, 2) === "BM" && bytes.length >= 18 && [12, 40, 52, 56, 64, 108, 124].includes(bytes.readUInt32LE(14))) {
+    return { kind: "image", contentType: "image/bmp" };
+  }
+  if (ascii(0, 4) === "II*\0" || ascii(0, 4) === "MM\0*") return { kind: "image", contentType: "image/tiff" };
+  if (bytes.length >= 12 && ascii(4, 8) === "ftyp") {
+    const brand = ascii(8, 12);
+    if (["heic", "heix", "hevc", "hevx", "heim", "heis"].includes(brand)) return { kind: "image", contentType: "image/heic" };
+    if (["mif1", "msf1"].includes(brand)) return { kind: "image", contentType: "image/heif" };
+    if (brand === "qt  ") return { kind: "video", contentType: "video/quicktime" };
+    if (["isom", "iso2", "iso3", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1", "dash", "M4V "].includes(brand)) {
+      return { kind: "video", contentType: "video/mp4" };
+    }
+  }
+  return undefined;
 }
 
 function extractUploadedMediaUrl(response) {
@@ -849,20 +1033,16 @@ function mediaInfoFromPath(file) {
   return undefined;
 }
 
+const SUPPORTED_MEDIA_TYPES = new Set([
+  "image/bmp", "image/gif", "image/heic", "image/heif", "image/jpeg", "image/png", "image/tiff", "image/webp",
+  "video/mp4", "video/quicktime",
+]);
+
 function mediaInfoFromMime(contentType) {
   if (typeof contentType !== "string") return undefined;
-  const lower = contentType.toLowerCase();
-  if (lower.startsWith("image/jpeg")) return { kind: "image", contentType: "image/jpeg" };
-  if (lower.startsWith("image/png")) return { kind: "image", contentType: "image/png" };
-  if (lower.startsWith("image/webp")) return { kind: "image", contentType: "image/webp" };
-  if (lower.startsWith("video/mp4")) return { kind: "video", contentType: "video/mp4" };
-  if (lower.startsWith("video/quicktime")) return { kind: "video", contentType: "video/quicktime" };
-  if (lower.startsWith("image/bmp")) return { kind: "image", contentType: "image/bmp" };
-  if (lower.startsWith("image/tiff")) return { kind: "image", contentType: "image/tiff" };
-  if (lower.startsWith("image/gif")) return { kind: "image", contentType: "image/gif" };
-  if (lower.startsWith("image/heic")) return { kind: "image", contentType: "image/heic" };
-  if (lower.startsWith("image/heif")) return { kind: "image", contentType: "image/heif" };
-  return undefined;
+  const type = contentType.split(";", 1)[0].trim().toLowerCase();
+  if (!SUPPORTED_MEDIA_TYPES.has(type)) return undefined;
+  return { kind: type.startsWith("video/") ? "video" : "image", contentType: type };
 }
 
 function mediaRoleFromOption(optionName, kind) {
@@ -890,11 +1070,106 @@ function headerValue(headers, name) {
   return headers[name] ?? headers[name.toLowerCase()];
 }
 
-async function waitForVideoResult(response, options) {
-  if (hasArtifact(response)) return response;
-  const taskId = videoTaskId(response);
-  if (!taskId) return response;
+async function handleVideoTask(command, deps) {
+  const taskId = command.options.task_id;
+  if (typeof taskId !== "string" || !taskId.trim()) {
+    throw new Error(`Missing video task ID. Run \`flatkey video ${command.action} --task-id <id>\`.`);
+  }
+  const { resolveApiKey, resolveOrigins } = await import("./config.js");
+  const config = { env: deps.env ?? process.env, configDir: deps.configDir };
+  const { routerOrigin } = await resolveOrigins({ ...config, baseUrl: command.options.base_url });
+  const options = {
+    ...command.options,
+    baseUrl: routerOrigin ?? DEFAULT_BASE_URL,
+    fetch: deps.fetch,
+    sleep: deps.sleep,
+    verboseLog: verboseLogger(deps.stderr, command.options.verbose),
+  };
+  if (command.options.dry_run) {
+    const plan = command.action === "status" ? planVideoStatusRequest : planVideoContentRequest;
+    return { dryRun: true, kind: `video ${command.action}`, request: redactRequest(plan(options, taskId)) };
+  }
+  options.apiKey = await resolveApiKey({ ...config, apiKey: command.options.api_key });
+  const response = await readVideoStatus(options, taskId);
+  const task = videoTaskPayload(response);
+  const status = task?.status ?? (isVideoFailed(task) ? "failed" : hasArtifact(task) ? "completed" : "unknown");
+  if (command.action === "status") {
+    const hint = isVideoFailed(task) ? silentVideoHint(options, task, videoFailureReason(task), task?.error?.code) : undefined;
+    const requestId = getResponseMetadata(response)?.requestId ?? task?.request_id ?? task?.error?.request_id;
+    return { ...scrubArtifactResponse(task), taskId, status, ...(requestId ? { requestId } : {}), ...(hint ? { hint } : {}) };
+  }
+  if (!completedVideoResult(response, options, taskId)) {
+    throw videoTaskError(options, taskId, `Video is not ready to download (status: ${status}).`, {
+      code: "video_not_ready", taskStatus: status,
+    });
+  }
+  try {
+    const artifacts = await persistArtifacts({
+      kind: "video", outDir: command.options.out, output: command.options.output, downloadRemote: true,
+      response: { url: planVideoContentRequest(options, taskId).url },
+      fetch: videoArtifactFetch(options, taskId),
+    });
+    return { taskId, status, artifacts };
+  } catch (cause) {
+    throw videoTaskError(options, taskId, cause.message, { cause, taskStatus: status });
+  }
+}
 
+function videoArtifactFetch(options, taskId) {
+  const contentUrl = taskId ? planVideoContentRequest(options, taskId).url : undefined;
+  return (url, init) => url === contentUrl
+    ? fetchVideoContent(options, taskId)
+    : fetchWithRetry(options, url, init);
+}
+
+function videoTaskArgs(action, taskId, options) {
+  const args = ["video", action, "--task-id", taskId];
+  const router = options.base_url ?? (options.baseUrl !== DEFAULT_BASE_URL ? options.baseUrl : undefined);
+  if (router) args.push("--base-url", router);
+  if (action === "download") {
+    if (options.output) args.push("--output", options.output);
+    else if (options.out) args.push("--out", options.out);
+  }
+  return args;
+}
+
+function videoTaskError(options, taskId, message, { cause, code, taskStatus, response } = {}) {
+  const action = isVideoDone({ status: taskStatus }) ? "download" : "status";
+  const hint = taskId ? ` Run \`${formatVideoTaskCommand(videoTaskArgs(action, taskId, options))}\` to access this task.` : "";
+  const task = videoTaskPayload(response);
+  const audioHint = silentVideoHint(options, task, message, code ?? cause?.code);
+  const http = getResponseMetadata(response);
+  return new FlatkeyError(`${message}${audioHint ? ` ${audioHint}` : ""}${hint}`, {
+    taskId, taskStatus, cause, code: code ?? cause?.code,
+    status: cause?.status ?? http?.status,
+    requestId: cause?.requestId ?? http?.requestId ?? task?.request_id ?? task?.error?.request_id,
+    retryAfterMs: cause?.retryAfterMs,
+  });
+}
+
+async function readVideoStatus(options, taskId) {
+  try {
+    return await getVideo(options, taskId);
+  } catch (cause) {
+    throw videoTaskError(options, taskId, cause.message, { cause });
+  }
+}
+
+function videoTaskPayload(response) {
+  return response?.data && typeof response.data === "object" && !Array.isArray(response.data)
+    && !response.status && !response.error ? response.data : response;
+}
+
+function videoSubmissionReceipt(task, options, taskId) {
+  return {
+    kind: "video", taskId, status: task.status ?? "submitted", model: options.model,
+    downloadArgs: videoTaskArgs("download", taskId, options),
+    ...(options.__copy_reference_mode ? { copyReferenceMode: options.__copy_reference_mode } : {}),
+  };
+}
+
+async function waitForVideoResult(response, options, taskId) {
+  if (!taskId) throw new Error("Video response contained neither a result nor a task ID.");
   const timeoutMs = parsePositiveInteger(
     options.video_wait_timeout_ms ?? options.env?.FLATKEY_VIDEO_WAIT_TIMEOUT_MS,
     600_000,
@@ -904,31 +1179,70 @@ async function waitForVideoResult(response, options) {
     5_000,
   );
   const deadline = Date.now() + timeoutMs;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const polling = { ...options, signal: controller.signal };
   let last = response;
-
-  while (Date.now() <= deadline) {
-    last = await options.getVideo(options, taskId);
-    if (hasArtifact(last)) return last;
-    if (isVideoDone(last)) return withVideoContentFallback(last, options, taskId);
-    if (isVideoFailed(last)) {
-      const message = last?.error?.message ?? last?.message ?? `Video generation failed: ${taskId}`;
-      throw new Error(message);
+  try {
+    while (Date.now() < deadline && !controller.signal.aborted) {
+      const statusResponse = await readVideoStatus(polling, taskId);
+      last = videoTaskPayload(statusResponse);
+      if (controller.signal.aborted || Date.now() >= deadline) break;
+      const result = completedVideoResult(statusResponse, options, taskId);
+      if (result) return result;
+      await delay(Math.min(intervalMs, Math.max(0, deadline - Date.now())), { sleep: options.sleep });
     }
-    await delay(intervalMs, { sleep: options.sleep });
+  } catch (error) {
+    const remaining = deadline - Date.now();
+    if (!controller.signal.aborted && remaining > 0) {
+      if ((error.status === 429 || error.status === 503) && error.retryAfterMs > remaining) {
+        throw videoTaskError(options, taskId, "The next status retry falls outside the video wait deadline.", {
+          cause: error, code: "video_wait_timeout", taskStatus: last?.status,
+        });
+      }
+      throw error;
+    }
+  } finally {
+    clearTimeout(timer);
   }
 
-  throw new Error(`Video task still processing after ${Math.round(timeoutMs / 1000)}s: ${taskId}`);
+  const elapsed = timeoutMs < 1000 ? `${timeoutMs}ms` : `${timeoutMs / 1000}s`;
+  throw videoTaskError(options, taskId, `Timed out waiting ${elapsed} for video task ${taskId}.`, {
+    code: "video_wait_timeout", taskStatus: last?.status,
+  });
 }
 
-function withVideoContentFallback(response, options, taskId) {
-  const baseUrl = String(options.baseUrl ?? "").replace(/\/$/, "");
-  if (!baseUrl || !taskId) return response;
+function videoFailureReason(task) {
+  return firstNonEmpty(task?.error?.message, task?.error, task?.fail_reason, task?.failure_reason, task?.message);
+}
+
+function silentVideoHint(options, task, reason, code) {
+  const audio = options.generate_audio ?? task?.generate_audio;
+  if (!/seedance/i.test(task?.model ?? options.model ?? "") || audio === false || audio === "false") return;
+  const details = `${code ?? ""} ${reason ?? ""}`;
+  if (/(?:output|generated)[\s_-]*(?:audio|soundtrack)|(?:输出|生成)的?音[轨频]/i.test(details)
+    && /copyright|版权|著作权/i.test(details)) {
+    return "For a silent video, start a new task with --generate-audio false.";
+  }
+}
+
+function completedVideoResult(raw, options, taskId) {
+  const response = videoTaskPayload(raw);
+  if (isVideoFailed(response)) {
+    const status = response?.status ?? "failed";
+    const reason = videoFailureReason(response);
+    throw videoTaskError(options, taskId, `Video task ${status}${reason ? `: ${reason}` : "."}`, {
+      code: response?.error?.code ?? response?.code ?? "video_task_failed", taskStatus: status, response: raw,
+    });
+  }
+  if (response?.status && !isVideoDone(response)) return undefined;
+  if (hasArtifact(response)) return response;
+  if (!isVideoDone(response) || !taskId) return undefined;
+  const url = planVideoContentRequest(options, taskId).url;
   return {
     ...response,
-    metadata: {
-      ...(response.metadata ?? {}),
-      url: `${baseUrl}/v1/videos/${encodeURIComponent(taskId)}/content`,
-    },
+    metadata: { ...response.metadata, url },
+    data: [{ url }],
   };
 }
 
@@ -999,6 +1313,7 @@ function scrubVideoCopy(value) {
 }
 
 function isDepthVideoFetchFailure(error) {
+  if (error?.status !== 400 && error?.status !== 422) return false;
   const code = String(error?.code ?? "").toLowerCase();
   const message = String(error?.message ?? error).toLowerCase();
   return code.includes("fail_to_fetch")
@@ -1158,7 +1473,7 @@ function extractStatusDisplayFields(status) {
 
 async function handleModels(command, deps) {
   const { resolveApiKey, resolveOrigins } = await import("./config.js");
-  const { getModels } = await import("./api.js");
+  const { getPublicModelPricing } = await import("./api.js");
   const { normalizeModels } = await import("./models.js");
 
   const apiKey = await resolveApiKey({
@@ -1168,17 +1483,27 @@ async function handleModels(command, deps) {
   });
   const { consoleOrigin } = await resolveOrigins({
     baseUrl: command.options.base_url,
+    consoleUrl: command.options.console_url,
     env: deps.env ?? process.env,
     configDir: deps.configDir,
   });
-  const response = await getModels({
+  const options = {
     apiKey,
     baseUrl: consoleOrigin,
     fetch: deps.fetch,
+    sleep: deps.sleep,
     verbose: command.options.verbose,
     verboseLog: verboseLogger(deps.stderr, command.options.verbose),
-  });
-  return { models: normalizeModels(response, command.options.type) };
+  };
+  const models = normalizeModels(await getModels(options), command.options.type);
+  if (!command.options.pricing) return { models };
+  const prices = (await getPublicModelPricing(options)).display_pricing ?? {};
+  return {
+    pricingGroup: "plg",
+    models: models.map((model) => ({
+      ...model, pricing: Object.hasOwn(prices, model.id) ? prices[model.id] : null,
+    })),
+  };
 }
 
 function verboseLogger(stream, enabled) {
@@ -1194,9 +1519,12 @@ function formatHuman(result) {
   if (typeof result === "string") return result;
   if (!result || typeof result !== "object") return String(result);
   if (result.dryRun && result.request) return formatDryRun(result);
+  if (result.taskId && !result.kind && Array.isArray(result.artifacts)) {
+    return [`Video task: ${result.taskId}`, ...result.artifacts.map((artifact) => `Saved: ${artifact.path}`)].join("\n");
+  }
   if (result.kind === "upload") return formatUploadResult(result);
   if (result.kind) return formatGenerationResult(result);
-  if (Array.isArray(result.models)) return formatModels(result.models);
+  if (Array.isArray(result.models)) return formatModels(result.models, result.pricingGroup);
   if (Array.isArray(result.voices)) return formatVoices(result.voices);
   if (typeof result.authenticated === "boolean") return formatAuthStatus(result);
   return formatKeyValues(result);
@@ -1207,6 +1535,9 @@ function formatDryRun(result) {
     `Dry run: ${result.kind}`,
     `${result.request.method ?? "GET"} ${result.request.url}`,
   ];
+  if (result.previewModel) {
+    lines.push(`Preview model: ${result.previewModel}. A live request selects from your account's model list.`);
+  }
   if (result.request.body !== undefined) {
     lines.push("Body:");
     lines.push(JSON.stringify(result.request.body, null, 2));
@@ -1221,7 +1552,22 @@ function formatUploadResult(result) {
   return lines.join("\n");
 }
 
+function formatVideoTaskCommand(args) {
+  const quoted = args.map((arg) => {
+    if (/^[\w./:@+,=~-]+$/.test(arg)) return arg;
+    const value = process.platform === "win32" ? arg.replaceAll("'", "''") : arg.replaceAll("'", "'\\''");
+    return `'${value}'`;
+  });
+  return `flatkey ${quoted.join(" ")}`;
+}
+
 function formatGenerationResult(result) {
+  if (result.downloadArgs) {
+    return [
+      `Video task ${result.taskId} (${result.status}).`,
+      `Download when ready: ${formatVideoTaskCommand(result.downloadArgs)}`,
+    ].join("\n");
+  }
   if (result.kind === "text") {
     const lines = [result.text || "(empty text)"];
     if (result.output) lines.push(`Saved: ${result.output}`);
@@ -1238,19 +1584,33 @@ function formatGenerationResult(result) {
   return lines.join("\n");
 }
 
-function formatModels(models) {
+function formatModels(models, pricingGroup) {
   if (models.length === 0) return "No models available.";
   return [
     `Available models (${models.length}):`,
     formatTable(
-      ["Model", "Type", "Source"],
+      ["Model", "Type", "Source", "Image CLI", ...(pricingGroup ? ["Public PLG rate (USD)"] : [])],
       models.map((model) => [
         model.id,
         model.type ?? "",
         model.source ?? "",
+        model.type === "image" ? (model.cliSupported ? "supported" : "unsupported") : "",
+        ...(pricingGroup ? [formatPublicRate(model.pricing)] : []),
       ]),
     ),
   ].join("\n");
+}
+
+function formatPublicRate(pricing) {
+  if (!pricing?.prices) return "Not listed";
+  const { request, second, input, output, image } = pricing.prices;
+  const rate = (pair) => `${pair.from ? "from " : ""}$${pair.plg}`;
+  if (request?.plg != null) return `${rate(request)}/request`;
+  if (second?.plg != null) return `${rate(second)}/s`;
+  const tokenRates = Object.entries({ input, output, image })
+    .filter(([, pair]) => pair?.plg != null)
+    .map(([key, pair]) => `${rate(pair)}/1M ${key} tokens`);
+  return tokenRates.join(", ") || pricing.billing_kind || "Not listed";
 }
 
 function formatVoices(voices) {
@@ -1348,7 +1708,7 @@ async function readPackageVersion() {
 }
 
 async function maybeWriteUpdateNotice(command, deps = {}) {
-  if (command.options.json || command.options.help || command.group === "help" || command.group === "version") {
+  if (command.options.dry_run || command.options.no_wait || command.options.json || command.options.help || command.group === "help" || command.group === "version") {
     return;
   }
   try {

@@ -41,6 +41,8 @@ test("command help covers each command and action", () => {
     "video",
     "video generate",
     "video copy",
+    "video status",
+    "video download",
     "audio",
     "audio generate",
     "audio sfx",
@@ -58,6 +60,12 @@ test("command help covers each command and action", () => {
   }
   assert.match(getCommandHelp("video", "generate"), /--resolution/);
   assert.match(getCommandHelp("video", "generate"), /--generate-audio/);
+  assert.match(getCommandHelp("video", "generate"), /768P.*2K.*MiniMax H3/);
+  assert.match(getCommandHelp("video", "generate"), /first frames use adaptive/);
+  assert.match(getCommandHelp("video", "generate"), /--no-wait/);
+  assert.match(getCommandHelp("video", "status"), /--task-id/);
+  assert.match(getCommandHelp("video", "download"), /-o/);
+  assert.match(getCommandHelp("models"), /--pricing/);
   assert.match(getCommandHelp("video", "copy"), /--frame-ratio/);
   assert.match(getCommandHelp("video", "copy"), /--depth-resolution/);
   assert.match(getCommandHelp("image", "generate"), /--output-format/);

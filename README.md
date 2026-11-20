@@ -16,7 +16,7 @@ npm install -g @flatkey-ai/cli
 flatkey login
 
 flatkey image generate --prompt "editorial cover, neon city at dawn" -o cover.png
-flatkey video generate --prompt "cinematic product launch clip" --model seedance2 -o launch.mp4
+flatkey video generate --prompt "cinematic product launch clip" -o launch.mp4
 flatkey audio generate --prompt "你好，这是 Flatkey 的配音测试" -o speech.mp3
 flatkey models --json
 flatkey credits --json
@@ -114,6 +114,8 @@ Create a key at [console.flatkey.ai/keys](https://console.flatkey.ai/keys), then
 
 ## Commands
 
+For live image and video generation, the CLI selects a model from your account's catalog that supports the requested options. Pass `--model` to use a specific model ID and skip the catalog lookup.
+
 ### Generate Image
 
 ```bash
@@ -123,13 +125,18 @@ flatkey image generate \
   -o cover.png
 ```
 
-Reference images (`--file` / `--image-url`) are sent as an image edit: gpt
-models go through `/v1/images/edits`, Gemini models receive them as native
-`fileData` parts, and Seedream models receive them as an `image` URL array on
-`/v1/images/generations`, so the input image is preserved instead of being ignored.
+Pass a local reference with `--file` or a remote reference with `--image-url`. When HEAD cannot verify a signed URL, the CLI checks up to the first 64 KiB with GET.
 
-Seedream returns JPEG (`output_format: "jpeg"`) and does not accept OpenAI's
-`temp_url` field; the CLI routes it correctly and keeps the provider URL.
+| Image model | Endpoint with references | Reference format |
+| --- | --- | --- |
+| GPT Image | `/v1/images/edits` | `images[].image_url` |
+| Gemini image (including Nano Banana) | `/v1beta/models/{model}:generateContent` | `fileData` parts with the URL and MIME type |
+| Seedream | `/v1/images/generations` | An `image` array of URLs. The default output is a provider-hosted JPEG. Seedream 5 supports `--output-format png` or `jpeg`. |
+| Grok Imagine | `/v1/images/edits` | One `image` object or an `images` array. Native xAI accepts up to five references. The subscription channel accepts three. |
+
+`grok-2-image-1212` generates images from text. For Grok edits, choose an Imagine model. To set `--quality`, use `grok-imagine-image-2.0` with `low`, `medium`, or `auto`.
+
+If Gemini blocks the request or returns no image, the CLI exits with a nonzero status. With `--json`, stderr includes `error.code` (`image_generation_blocked` or `image_no_output`).
 
 Animated GIFs (gpt-image-2.6):
 
@@ -145,11 +152,7 @@ flatkey image generate \
   -o crane.gif
 ```
 
-`--output-format` accepts `png`, `jpeg`, `webp`, or `gif`. `--frame-count`,
-`--frame-duration-ms`, `--quality`, and `--complexity` shape the animation.
-These options are gpt image model only; passing them with a Gemini model fails
-instead of silently returning a still image. When no `-o` path is given, saved
-artifacts use the requested format's extension (e.g. `flatkey-output/image-01.gif`).
+GPT Image accepts `png`, `jpeg`, `webp`, or `gif`. For a GPT Image 2.6 animation, use `--frame-count`, `--frame-duration-ms`, `--quality`, and `--complexity`. Saved files use the requested format's extension, such as `flatkey-output/image-01.gif`.
 
 Upload a local image and get a temporary signed URL:
 
@@ -190,8 +193,7 @@ reference. If the selected upstream model cannot fetch video references, the
 CLI explicitly falls back to three depth keyframes and reports that mode in
 JSON output as `depth-keyframes-fallback`.
 
-Video ratios: `16:9`, `9:16`, `4:3`, `3:4`, `21:9`, `1:1`, `adaptive`.
-Video resolutions: `480p`, `720p`, `1080p`.
+The available `--ratio` values are `16:9`, `9:16`, `4:3`, `3:4`, `21:9`, `1:1`, and `adaptive`. Seedance supports `480p`, `720p`, and `1080p`. MiniMax H3 accepts `--resolution 768P` (the default) or `2K`. Video requests enable audio by default. Use `--generate-audio false` for a silent clip.
 
 Local reference images are uploaded through Flatkey temporary media first:
 
@@ -219,7 +221,7 @@ For Seedance 2.5, the CLI allows up to 30 reference images and 10 reference
 videos in one request. Local files are uploaded before generation and all
 inputs keep their command-line order. Reference videos can be `.mp4` or `.mov`.
 
-First/last frame:
+Use `--first-frame` and `--last-frame` for boundary frames. With a Seedance 2.5 first frame, omit `--ratio` or set it to `adaptive` so the video follows the frame's aspect ratio.
 
 ```bash
 flatkey video generate \
@@ -228,6 +230,17 @@ flatkey video generate \
   --first-frame ./first.png \
   --last-frame ./last.png \
   -o transition.mp4
+```
+
+### Resume a video task
+
+Use `--no-wait` with `video generate` or `video copy` to return the `taskId` as soon as an asynchronous task is accepted. If the CLI already has a task ID, timeouts and failures include it as `error.taskId` in JSON. Use the same ID to check a queued task and download its completed output.
+
+```bash
+flatkey video generate --prompt "slow camera pan" --no-wait --json
+task_id="task_..."
+flatkey video status "$task_id" --json
+flatkey video download --task-id "$task_id" -o launch.mp4 --json
 ```
 
 ### Generate Audio
@@ -284,24 +297,18 @@ flatkey text generate \
 flatkey credits --json
 flatkey status --json
 flatkey models --json
-flatkey models --type image --json
+flatkey models --type image --pricing --json
 flatkey help --ai
 ```
 
+Image entries include `cliSupported` in JSON. `models --pricing` adds public PLG unit rates in USD. The JSON includes `pricingGroup: "plg"` and a `pricing` entry for each model (`null` when no public rate is listed). The actual charge depends on your account and usage.
+
 ## Models
-
-Live model list:
-
-```bash
-flatkey models --json
-```
-
-Useful current defaults:
 
 | Type | Models |
 | --- | --- |
-| Image | `gpt-image-2`, `nano-banana-pro-preview`, Gemini image models, `seedream-5-0-pro` / `seedream-5-0` / `seedream-4-5` |
-| Video | `seedance2`, `veo-3`, `veo-3-fast` |
+| Image | GPT Image (`gpt-image-2`), Gemini (`nano-banana-pro-preview`), Seedream (`seedream-5-0-pro`, `seedream-5-0`, `seedream-4-5`), Grok image |
+| Video | Seedance (`seedance2`), MiniMax H3, Veo (`veo-3`, `veo-3-fast`) |
 | Audio | `eleven_multilingual_v2`, ElevenLabs voices, sound effects, music |
 | Text | `gpt-5.5`, Claude, Gemini, GLM, Grok models |
 
@@ -324,9 +331,8 @@ Agent rules:
 - Use `--image`, `--first-frame`, or `--last-frame` to pass local images into video generation.
 - Call `flatkey models --json` before choosing a model.
 - Call `flatkey audio voices --json` before choosing a TTS `voice_id`.
-- Use `--dry-run` to inspect request shape without spending credits.
 
-Example dry run:
+Use `--dry-run` for an offline preview. Local references appear as `<upload: path>` and remote URLs appear as supplied, with no upload or URL probe. A `video copy` preview uses a placeholder for the depth video and skips the video runtime. When `--model` is omitted, `previewModel` identifies the model used to illustrate the request offline.
 
 ```bash
 flatkey video generate \

@@ -18,7 +18,7 @@ test("normalizes remote model arrays", () => {
   });
 
   assert.deepEqual(models, [
-    { id: "img-x", type: "image", source: "remote" },
+    { id: "img-x", type: "image", source: "remote", cliSupported: false },
     { id: "vid-x", type: "video", source: "remote" },
   ]);
 });
@@ -37,7 +37,7 @@ test("normalizes OpenAI model list response from /v1/models", () => {
   assert.deepEqual(models, [
     { id: "gpt-5.5", type: "text", source: "remote" },
     { id: "seedance2", type: "video", source: "remote" },
-    { id: "gpt-image-2", type: "image", source: "remote" },
-    { id: "nano-banana-pro-preview", type: "image", source: "remote" },
+    { id: "gpt-image-2", type: "image", source: "remote", cliSupported: true },
+    { id: "nano-banana-pro-preview", type: "image", source: "remote", cliSupported: true },
   ]);
 });

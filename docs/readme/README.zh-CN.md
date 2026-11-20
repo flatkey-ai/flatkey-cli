@@ -66,13 +66,15 @@ flatkey onboard --api-key <key>
 
 ```bash
 flatkey image generate --prompt "editorial cover, neon city at dawn" -o cover.png
-flatkey video generate --prompt "cinematic product launch clip" --model seedance2 -o launch.mp4
+flatkey video generate --prompt "cinematic product launch clip" -o launch.mp4
 flatkey audio generate --prompt "你好，这是 Flatkey 的配音测试" -o speech.mp3
 flatkey models --json
 flatkey credits --json
 ```
 
 ## 常用命令
+
+正式生成图片或视频时，CLI 会从当前账号的模型目录中选择能处理本次参数的模型。传入 `--model` 可固定模型 ID，跳过目录查询。
 
 ### 生成图片
 
@@ -83,6 +85,19 @@ flatkey image generate \
   -o cover.png
 ```
 
+本地参考图用 `--file`，远程参考图用 `--image-url`。正式请求中，如果 HEAD 无法确认签名 URL 的素材类型，CLI 会用 GET 检查文件开头最多 64 KiB。
+
+| 图像模型 | 有参考图时的接口 | 参考图格式 |
+| --- | --- | --- |
+| GPT Image | `/v1/images/edits` | `images[].image_url` |
+| Gemini（含 Nano Banana） | `/v1beta/models/{model}:generateContent` | `fileData` 部件包含 URL 和 MIME 类型 |
+| Seedream | `/v1/images/generations` | `image` 是 URL 数组。Seedream 5 支持 `--output-format png` 或 `jpeg`。 |
+| Grok Imagine | `/v1/images/edits` | 单图用 `image`，多图用 `images`。原生 xAI 接口最多接受 5 张，订阅通道最多接受 3 张。 |
+
+`grok-2-image-1212` 用于文生图，编辑参考图时请选择 Imagine 型号。需要指定质量时，可选 `grok-imagine-image-2.0` 并传入 `--quality low`、`medium` 或 `auto`。
+
+Gemini 拦截请求或未返回图片时，CLI 以非零状态退出。使用 `--json` 时，标准错误输出中的 `error.code` 分别是 `image_generation_blocked` 和 `image_no_output`。
+
 ### 生成视频
 
 ```bash
@@ -91,6 +106,21 @@ flatkey video generate \
   --model seedance2 \
   -o launch.mp4
 ```
+
+Seedance 2.5 用 `--first-frame` 或 `--first-frame-url` 指定首帧，宽高比跟随首帧。可省略 `--ratio` 或传 `--ratio adaptive`。MiniMax H3 支持 `--resolution 768P`（默认）或 `2K`。视频默认生成音频，需要静音时传 `--generate-audio false`。
+
+`video generate` 和 `video copy` 支持 `--no-wait`，异步任务受理后立即返回 `taskId`。CLI 已收到任务 ID 时，等待超时或任务失败的 JSON 错误中会保留 `error.taskId`。排队或处理中的任务可以用同一 ID 查询，完成后下载。
+
+```bash
+flatkey video generate --prompt "slow camera pan" --no-wait --json
+task_id="task_..."
+flatkey video status "$task_id" --json
+flatkey video download --task-id "$task_id" -o launch.mp4 --json
+```
+
+### 离线预演
+
+加 `--dry-run --json` 可以离线查看请求。本地素材显示为 `<upload: 路径>`，远程 URL 原样保留，跳过上传和 URL 探测。`video copy --source input.mp4 --dry-run` 会用占位符表示待生成的深度视频，无需启动视频运行时。预演中省略 `--model` 时，`previewModel` 给出离线示例使用的模型。
 
 ### 生成语音
 
@@ -144,9 +174,11 @@ flatkey text generate \
 flatkey credits --json
 flatkey status --json
 flatkey models --json
-flatkey models --type image --json
+flatkey models --type image --pricing --json
 flatkey help --ai
 ```
+
+图像模型的 JSON 结果包含 `cliSupported`，表示 CLI 是否支持该模型。`models --pricing` 增加公开的 PLG 美元单价。JSON 中的 `pricingGroup` 为 `"plg"`，每个模型的 `pricing` 字段列出价格，没有公开单价时为 `null`。实际费用取决于账号和用量。
 
 ## 给 AI Agent 的最短说明
 
@@ -163,7 +195,7 @@ flatkey help --ai
 2. 需要本地文件时，必须加 --output 或 -o。
 3. 不确定模型时，先跑 flatkey models --json。
 4. 做 TTS 前，先跑 flatkey audio voices --json 拿 voice_id。
-5. 看请求但不烧钱，用 --dry-run --json。
+5. 用 --dry-run --json 离线预览生成请求。
 ```
 
 ## 路由

@@ -5,8 +5,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const BIN = new URL("../bin/flatkey.js", import.meta.url).pathname;
+const BIN = fileURLToPath(new URL("../bin/flatkey.js", import.meta.url));
 
 test("runs generation and utility commands in json mode", async (t) => {
   const requests = [];
@@ -43,7 +44,7 @@ test("runs generation and utility commands in json mode", async (t) => {
         response.end(JSON.stringify({
           success: true,
           object: "list",
-          data: [{ id: "remote-image", object: "model", owned_by: "flatkey" }],
+          data: [{ id: "gemini-2.5-flash-image", type: "image" }, { id: "seedance2", type: "video" }],
         }));
       } else if (request.url === "/v1/voices") {
         response.setHeader("content-type", "application/json");
@@ -86,7 +87,8 @@ test("runs generation and utility commands in json mode", async (t) => {
   assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(status.stdout), "user_id"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(JSON.parse(status.stdout), "userId"), false);
   assert.deepEqual(JSON.parse(models.stdout).models, [
-    { id: "remote-image", type: "image", source: "remote" },
+    { id: "gemini-2.5-flash-image", type: "image", source: "remote", cliSupported: true },
+    { id: "seedance2", type: "video", source: "remote" },
   ]);
   assert.deepEqual(JSON.parse(voices.stdout).voices, [{ voice_id: "voice-123", name: "Rachel" }]);
   assert.equal(image.stderr, "");
@@ -128,7 +130,7 @@ test("formats command output as human text by default", async (t) => {
   const models = await runCli(["models", ...common], { cwd });
   const credits = await runCli(["credits", ...common], { cwd });
   const status = await runCli(["status", ...common], { cwd });
-  const video = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
+  const video = await runCli(["video", "generate", "--model", "seedance2", "--prompt", "clip", ...common], { cwd });
 
   assert.match(models.stdout, /Available models \(1\):/);
   assert.match(models.stdout, /Model\s+Type\s+Source/);
@@ -174,8 +176,8 @@ test("video generation increments default output filenames across runs", async (
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const common = ["--base-url", baseUrl, "--api-key", "test-key", "--json"];
 
-  const first = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
-  const second = await runCli(["video", "generate", "--prompt", "clip", ...common], { cwd });
+  const first = await runCli(["video", "generate", "--model", "seedance2", "--prompt", "clip", ...common], { cwd });
+  const second = await runCli(["video", "generate", "--model", "seedance2", "--prompt", "clip", ...common], { cwd });
   const firstPath = join(cwd, JSON.parse(first.stdout).artifacts[0].path);
   const secondPath = join(cwd, JSON.parse(second.stdout).artifacts[0].path);
 
@@ -364,6 +366,8 @@ test("generation commands write explicit output files", async (t) => {
   const video = await runCli([
     "video",
     "generate",
+    "--model",
+    "seedance2",
     "--prompt",
     "clip",
     "--output",
@@ -393,6 +397,49 @@ test("prints json errors to stderr in json mode", async () => {
       message: "Missing or invalid Flatkey API key. Run `flatkey login`, or create a key at https://console.flatkey.ai/keys and run `flatkey onboard --api-key <key>`.",
     },
   });
+});
+
+test("the executable preserves gateway diagnostics in stderr JSON", async (t) => {
+  let calls = 0;
+  const server = createServer((request, response) => {
+    calls++;
+    response.writeHead(429, {
+      "content-type": "application/json", "retry-after": "90", "x-oneapi-request-id": "req-fixture",
+    });
+    response.end(JSON.stringify({ error: { code: "rate_limit", message: "try later" } }));
+  });
+  t.after(() => server.close());
+  await listen(server);
+  const result = await runCliAllowFailure([
+    "image", "generate", "--model", "gpt-image-2", "--prompt", "sample",
+    "--api-key", "test-key", "--base-url", `http://127.0.0.1:${server.address().port}`, "--json", "-o", "unused.png",
+  ]);
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  assert.deepEqual(JSON.parse(result.stderr).error, {
+    message: "try later", status: 429, code: "rate_limit", requestId: "req-fixture", retryAfterMs: 90000,
+  });
+  assert.equal(calls, 1);
+});
+
+test("a semantic image rejection retains the successful HTTP response's request ID", async (t) => {
+  const server = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json", "x-oneapi-request-id": "req-safety" });
+    response.end(JSON.stringify({ candidates: [{ finishReason: "SAFETY", content: { parts: [] } }] }));
+  });
+  t.after(() => server.close());
+  await listen(server);
+  const result = await runCliAllowFailure([
+    "image", "generate", "--model", "gemini-2.5-flash-image", "--prompt", "fixture", "--json",
+    "--api-key", "test-key", "--base-url", `http://127.0.0.1:${server.address().port}`,
+  ]);
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  const error = JSON.parse(result.stderr).error;
+  assert.equal(error.status, 200);
+  assert.equal(error.code, "image_generation_blocked");
+  assert.equal(error.finishReason, "SAFETY");
+  assert.equal(error.requestId, "req-safety");
 });
 
 test("onboard without api key points user to key creation", async () => {

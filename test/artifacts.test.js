@@ -57,6 +57,23 @@ test("downloads remote gif artifact to explicit output path", async () => {
   assert.equal(await readFile(output, "utf8"), "gif-bytes");
 });
 
+test("a failed signed artifact download exposes HTTP details without printing the signed URL", async (t) => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifact-expired-"));
+  t.after(() => rm(outDir, { recursive: true, force: true }));
+  await assert.rejects(persistArtifacts({
+    kind: "image",
+    response: { data: [{ url: "https://cdn.test/result.png?signature=private-test-value" }] },
+    output: join(outDir, "result.png"),
+    fetch: async () => new Response(null, { status: 403, headers: { "x-request-id": "cdn-request" } }),
+  }), (error) => {
+    assert.equal(error.status, 403);
+    assert.equal(error.code, "artifact_download_failed");
+    assert.equal(error.requestId, "cdn-request");
+    assert.doesNotMatch(error.message, /private-test-value/);
+    return true;
+  });
+});
+
 test("saves data url gif artifacts with mime extension", async () => {
   const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifacts-"));
 
@@ -114,6 +131,24 @@ test("preserves remote url artifacts without downloading", async () => {
   });
 
   assert.deepEqual(artifacts, [{ url: "https://cdn.test/audio.mp3" }]);
+});
+
+test("concurrent auto-named downloads keep both artifacts and download each URL once", async (t) => {
+  const outDir = await mkdtemp(join(tmpdir(), "flatkey-artifact-download-"));
+  t.after(() => rm(outDir, { recursive: true, force: true }));
+  const calls = [];
+  const urls = ["https://cdn.test/first.mp4", "https://cdn.test/second.mp4"];
+  const results = await Promise.all(urls.map((url) => persistArtifacts({
+    kind: "video", outDir, response: { url }, downloadRemote: true,
+    fetch: async (requested) => {
+      calls.push(requested);
+      return new Response(requested);
+    },
+  })));
+  const paths = results.map(([item]) => item.path);
+  assert.deepEqual([...paths].sort(), [join(outDir, "video-01.mp4"), join(outDir, "video-02.mp4")]);
+  assert.deepEqual(await Promise.all(paths.map((path) => readFile(path, "utf8"))), urls);
+  assert.deepEqual(calls.sort(), urls);
 });
 
 test("preserves temp_url artifacts without downloading", async () => {
