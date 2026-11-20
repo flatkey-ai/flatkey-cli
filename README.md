@@ -125,7 +125,11 @@ flatkey image generate \
 
 Reference images (`--file` / `--image-url`) are sent as an image edit: gpt
 models go through `/v1/images/edits`, Gemini models receive them as native
-`fileData` parts, so the input image is preserved instead of being ignored.
+`fileData` parts, and Seedream models receive them as an `image` URL array on
+`/v1/images/generations`, so the input image is preserved instead of being ignored.
+
+Seedream returns JPEG (`output_format: "jpeg"`) and does not accept OpenAI's
+`temp_url` field; the CLI routes it correctly and keeps the provider URL.
 
 Animated GIFs (gpt-image-2.6):
 
@@ -296,7 +300,7 @@ Useful current defaults:
 
 | Type | Models |
 | --- | --- |
-| Image | `gpt-image-2`, `nano-banana-pro-preview`, Gemini image models |
+| Image | `gpt-image-2`, `nano-banana-pro-preview`, Gemini image models, `seedream-5-0-pro` / `seedream-5-0` / `seedream-4-5` |
 | Video | `seedance2`, `veo-3`, `veo-3-fast` |
 | Audio | `eleven_multilingual_v2`, ElevenLabs voices, sound effects, music |
 | Text | `gpt-5.5`, Claude, Gemini, GLM, Grok models |

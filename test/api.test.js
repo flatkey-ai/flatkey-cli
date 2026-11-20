@@ -169,6 +169,61 @@ test("rejects non-positive gif frame options", () => {
   );
 });
 
+test("routes Seedream models to images/generations with image URLs", async () => {
+  const { fetch, calls } = fetchRecorder({ data: [] });
+
+  await generateImage({
+    apiKey: "key",
+    baseUrl: "https://router.test",
+    model: "seedream-5-0-pro",
+    prompt: "classical figure painting",
+    size: "1024x1024",
+    __media_inputs: [
+      { name: "file", url: "https://storage.test/a.png", kind: "image" },
+      { name: "image_url", url: "https://storage.test/b.jpg", kind: "image" },
+    ],
+    fetch,
+  });
+
+  assert.equal(calls[0].url, "https://router.test/v1/images/generations");
+  assert.equal(calls[0].init.headers.Authorization, "Bearer key");
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    model: "seedream-5-0-pro",
+    prompt: "classical figure painting",
+    size: "1024x1024",
+    image: ["https://storage.test/a.png", "https://storage.test/b.jpg"],
+    response_format: "url",
+  });
+});
+
+test("builds Seedream text-to-image request without temp_url", () => {
+  const request = planImageRequest({
+    apiKey: "key",
+    model: "seedream-5-0",
+    prompt: "a red apple",
+  });
+
+  assert.equal(request.url, "https://router.flatkey.ai/v1/images/generations");
+  assert.deepEqual(request.body, {
+    model: "seedream-5-0",
+    prompt: "a red apple",
+    response_format: "url",
+  });
+  assert.equal("temp_url" in request.body, false);
+});
+
+test("rejects gpt-only image options on Seedream models", () => {
+  assert.throws(
+    () => planImageRequest({
+      apiKey: "key",
+      model: "seedream-5-0-pro",
+      prompt: "cover",
+      output_format: "gif",
+    }),
+    /--output-format is only supported by gpt image models, not seedream-5-0-pro/,
+  );
+});
+
 test("rejects gpt-only image options on gemini models", () => {
   assert.throws(
     () => planImageRequest({

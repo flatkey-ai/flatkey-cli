@@ -84,6 +84,19 @@ export function planImageRequest(options) {
   }
 
   assertGptImageOnlyOptions(options, model);
+  // Seedream is an OpenAI-style image model, not a Gemini one. It accepts a
+  // plain `image` URL array on /v1/images/generations and rejects temp_url.
+  if (isSeedreamImageModel(model)) {
+    return planJsonPost(options, "/v1/images/generations", cleanObject({
+      model,
+      prompt: options.prompt,
+      size: options.size,
+      n: parseOptionalInteger(options.n),
+      response_format: options.response_format ?? options.responseFormat ?? "url",
+      image: mediaInputs.length > 0 ? mediaInputs.map((entry) => entry.url) : undefined,
+    }));
+  }
+
   const path = `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(options.apiKey)}`;
   return planRequest(options, path, {
     method: "POST",
@@ -121,6 +134,10 @@ function assertGptImageOnlyOptions(options, model) {
     const flag = `--${aliases[0].replaceAll("_", "-")}`;
     throw new Error(`${flag} is only supported by gpt image models, not ${model}.`);
   }
+}
+
+function isSeedreamImageModel(model) {
+  return /seedream/i.test(String(model ?? ""));
 }
 
 function imageMimeType(entry) {
